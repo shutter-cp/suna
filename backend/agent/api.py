@@ -36,6 +36,15 @@ REDIS_RESPONSE_LIST_TTL = 3600 * 24
 
 
 class AgentStartRequest(BaseModel):
+    """代理启动请求模型
+    Attributes:
+        model_name: 可选模型名称，默认为None，将从config.MODEL_TO_USE中设置
+        enable_thinking: 是否启用思考模式，默认为False
+        reasoning_effort: 推理努力程度，默认为'low'
+        stream: 是否启用流式响应，默认为True
+        enable_context_manager: 是否启用上下文管理器，默认为False
+        agent_id: 可选的自定义代理ID
+    """
     model_name: Optional[str] = None  # Will be set from config.MODEL_TO_USE in the endpoint
     enable_thinking: Optional[bool] = False
     reasoning_effort: Optional[str] = 'low'
@@ -44,10 +53,26 @@ class AgentStartRequest(BaseModel):
     agent_id: Optional[str] = None  # Custom agent to use
 
 class InitiateAgentResponse(BaseModel):
+    """初始化代理响应模型
+    Attributes:
+        thread_id: 线程ID
+        agent_run_id: 可选的代理运行ID
+    """
     thread_id: str
     agent_run_id: Optional[str] = None
 
 class AgentCreateRequest(BaseModel):
+    """创建代理请求模型
+    Attributes:
+        name: 代理名称
+        description: 可选的代理描述
+        system_prompt: 系统提示
+        configured_mcps: 可选的配置的MCP列表
+        custom_mcps: 可选的自定义MCP列表
+        agentpress_tools: 可选的AgentPress工具
+        is_default: 是否默认版本，默认为False
+        avatar: 可选的代理头像
+    """
     name: str
     description: Optional[str] = None
     system_prompt: str
@@ -59,6 +84,21 @@ class AgentCreateRequest(BaseModel):
     avatar_color: Optional[str] = None
 
 class AgentVersionResponse(BaseModel):
+    """代理版本响应模型
+    Attributes:
+        version_id: 版本ID
+        agent_id: 代理ID
+        version_number: 版本号
+        version_name: 版本名称
+        system_prompt: 系统提示
+        configured_mcps: 配置的MCP列表
+        custom_mcps: 自定义MCP列表
+        agentpress_tools: AgentPress工具
+        is_active: 是否激活
+        created_at: 创建时间
+        updated_at: 更新时间
+        created_by: 可选的创建者
+    """
     version_id: str
     agent_id: str
     version_number: int
@@ -73,12 +113,32 @@ class AgentVersionResponse(BaseModel):
     created_by: Optional[str] = None
 
 class AgentVersionCreateRequest(BaseModel):
+    """创建代理版本请求模型
+    Attributes:
+        version_name: 版本名称
+        system_prompt: 系统提示
+        configured_mcps: 可选的配置的MCP列表
+        custom_mcps: 可选的自定义MCP列表
+        agentpress_tools: 可选的AgentPress工具
+    """
+    version_name: str
     system_prompt: str
     configured_mcps: Optional[List[Dict[str, Any]]] = []
     custom_mcps: Optional[List[Dict[str, Any]]] = []
     agentpress_tools: Optional[Dict[str, Any]] = {}
 
 class AgentUpdateRequest(BaseModel):
+    """更新代理请求模型
+    Attributes:
+        name: 可选的代理名称
+        description: 可选的代理描述
+        system_prompt: 可选的系统提示
+        configured_mcps: 可选的配置的MCP列表
+        custom_mcps: 可选的自定义MCP列表
+        agentpress_tools: 可选的AgentPress工具
+        is_default: 可选的是否默认版本
+        avatar: 可选的代理头像
+    """
     name: Optional[str] = None
     description: Optional[str] = None
     system_prompt: Optional[str] = None
@@ -90,6 +150,29 @@ class AgentUpdateRequest(BaseModel):
     avatar_color: Optional[str] = None
 
 class AgentResponse(BaseModel):
+    """代理响应模型
+    Attributes:
+        agent_id: 代理ID
+        account_id: 账户ID
+        name: 代理名称
+        description: 可选的代理描述
+        system_prompt: 系统提示
+        configured_mcps: 配置的MCP列表
+        custom_mcps: 自定义MCP列表
+        agentpress_tools: AgentPress工具
+        is_default: 是否默认版本
+        avatar: 可选的代理头像
+        avatar_color: 可选的代理头像颜色
+        created_at: 创建时间
+        updated_at: 更新时间
+        is_public: 可选的是否公开
+        marketplace_published_at: 可选的发布时间
+        download_count: 可选的下载次数
+        tags: 可选的标签列表
+        current_version_id: 可选的当前版本ID
+        version_count: 可选的版本数量
+        current_version: 可选的当前版本
+    """
     agent_id: str
     account_id: str
     name: str
@@ -112,16 +195,34 @@ class AgentResponse(BaseModel):
     current_version: Optional[AgentVersionResponse] = None
 
 class PaginationInfo(BaseModel):
+    """分页信息模型
+    Attributes:
+        page: 当前页码
+        limit: 每页数量
+        total: 总数量
+        pages: 总页数
+    """
     page: int
     limit: int
     total: int
     pages: int
 
 class AgentsResponse(BaseModel):
+    """代理列表响应模型
+    Attributes:
+        agents: 代理列表
+        pagination: 分页信息
+    """
     agents: List[AgentResponse]
     pagination: PaginationInfo
 
 class ThreadAgentResponse(BaseModel):
+    """线程代理响应模型
+    Attributes:
+        agent: 可选的代理
+        source: 来源
+        message: 消息
+    """
     agent: Optional[AgentResponse]
     source: str  # "thread", "default", "none", "missing"
     message: str
@@ -806,44 +907,55 @@ async def generate_and_update_project_name(project_id: str, prompt: str):
 
 @router.post("/agent/initiate", response_model=InitiateAgentResponse)
 async def initiate_agent_with_files(
-    prompt: str = Form(...),
-    model_name: Optional[str] = Form(None),  # Default to None to use config.MODEL_TO_USE
-    enable_thinking: Optional[bool] = Form(False),
-    reasoning_effort: Optional[str] = Form("low"),
-    stream: Optional[bool] = Form(True),
-    enable_context_manager: Optional[bool] = Form(False),
-    agent_id: Optional[str] = Form(None),  # Add agent_id parameter
-    files: List[UploadFile] = File(default=[]),
-    is_agent_builder: Optional[bool] = Form(False),
-    target_agent_id: Optional[str] = Form(None),
-    user_id: str = Depends(get_current_user_id_from_jwt)
+    prompt: str = Form(...),  # 用户输入的提示文本
+    model_name: Optional[str] = Form(None),  # 可选模型名称，默认为配置中的MODEL_TO_USE
+    enable_thinking: Optional[bool] = Form(False),  # 是否启用思考模式
+    reasoning_effort: Optional[str] = Form("low"),  # 推理努力程度
+    stream: Optional[bool] = Form(True),  # 是否启用流式响应
+    enable_context_manager: Optional[bool] = Form(False),  # 是否启用上下文管理器
+    agent_id: Optional[str] = Form(None),  # 可选代理ID
+    files: List[UploadFile] = File(default=[]),  # 上传的文件列表
+    is_agent_builder: Optional[bool] = Form(False),  # 是否为代理构建器模式
+    target_agent_id: Optional[str] = Form(None),  # 目标代理ID
+    user_id: str = Depends(get_current_user_id_from_jwt)  # 从JWT获取的用户ID
 ):
-    """Initiate a new agent session with optional file attachments."""
-    global instance_id # Ensure instance_id is accessible
+    """
+    初始化一个新的代理会话，支持可选的文件附件
+    
+    主要流程：
+    1. 验证实例ID并解析模型名称
+    2. 加载代理配置（自定义或默认）
+    3. 检查模型使用权限和账单状态
+    4. 创建项目、沙箱和线程
+    5. 上传文件到沙箱（如果有）
+    6. 添加初始用户消息
+    7. 启动代理运行
+    """
+    global instance_id # 确保instance_id可访问
     if not instance_id:
         raise HTTPException(status_code=500, detail="Agent API not initialized with instance ID")
 
-    # Use model from config if not specified in the request
+    # 如果请求中未指定模型名称，则使用配置中的默认模型
     logger.info(f"Original model_name from request: {model_name}")
 
     if model_name is None:
         model_name = config.MODEL_TO_USE
         logger.info(f"Using model from config: {model_name}")
 
-    # Log the model name after alias resolution
+    # 解析模型别名
     resolved_model = MODEL_NAME_ALIASES.get(model_name, model_name)
     logger.info(f"Resolved model name: {resolved_model}")
 
-    # Update model_name to use the resolved version
+    # 更新模型名称为解析后的版本
     model_name = resolved_model
 
     logger.info(f"Starting new agent in agent builder mode: {is_agent_builder}, target_agent_id: {target_agent_id}")
 
     logger.info(f"[\033[91mDEBUG\033[0m] Initiating new agent with prompt and {len(files)} files (Instance: {instance_id}), model: {model_name}, enable_thinking: {enable_thinking}")
     client = await db.client
-    account_id = user_id # In Basejump, personal account_id is the same as user_id
+    account_id = user_id # 在Basejump中，个人account_id与user_id相同
     
-    # Load agent configuration if agent_id is provided
+    # 如果提供了agent_id，则加载代理配置
     agent_config = None
     if agent_id:
         agent_result = await client.table('agents').select('*').eq('agent_id', agent_id).eq('account_id', account_id).execute()
@@ -852,22 +964,24 @@ async def initiate_agent_with_files(
         agent_config = agent_result.data[0]
         logger.info(f"Using custom agent: {agent_config['name']} ({agent_id})")
     else:
-        # Try to get default agent for the account
+        # 尝试获取账户的默认代理
         default_agent_result = await client.table('agents').select('*').eq('account_id', account_id).eq('is_default', True).execute()
         if default_agent_result.data:
             agent_config = default_agent_result.data[0]
             logger.info(f"Using default agent: {agent_config['name']} ({agent_config['agent_id']})")
     
+    # 检查模型使用权限
     can_use, model_message, allowed_models = await can_use_model(client, account_id, model_name)
     if not can_use:
         raise HTTPException(status_code=403, detail={"message": model_message, "allowed_models": allowed_models})
 
+    # 检查账单状态
     can_run, message, subscription = await check_billing_status(client, account_id)
     if not can_run:
         raise HTTPException(status_code=402, detail={"message": message, "subscription": subscription})
 
     try:
-        # 1. Create Project
+        # 1. 创建项目
         placeholder_name = f"{prompt[:30]}..." if len(prompt) > 30 else prompt
         project = await client.table('projects').insert({
             "project_id": str(uuid.uuid4()), "account_id": account_id, "name": placeholder_name,
@@ -876,7 +990,7 @@ async def initiate_agent_with_files(
         project_id = project.data[0]['project_id']
         logger.info(f"Created new project: {project_id}")
 
-        # 2. Create Sandbox
+        # 2. 创建沙箱
         sandbox_id = None
         try:
           sandbox_pass = str(uuid.uuid4())
@@ -884,7 +998,7 @@ async def initiate_agent_with_files(
           sandbox_id = sandbox.id
           logger.info(f"Created new sandbox {sandbox_id} for project {project_id}")
           
-          # Get preview links
+          # 获取预览链接
           vnc_link = await sandbox.get_preview_link(6080)
           website_link = await sandbox.get_preview_link(8080)
           vnc_url = vnc_link.url if hasattr(vnc_link, 'url') else str(vnc_link).split("url='")[1].split("'")[0]
@@ -902,8 +1016,7 @@ async def initiate_agent_with_files(
               except Exception as e: pass
             raise Exception("Failed to create sandbox")
 
-
-        # Update project with sandbox info
+        # 更新项目沙箱信息
         update_result = await client.table('projects').update({
             'sandbox': {
                 'id': sandbox_id, 'pass': sandbox_pass, 'vnc_preview': vnc_url,
@@ -918,7 +1031,7 @@ async def initiate_agent_with_files(
               except Exception as e: logger.error(f"Error deleting sandbox: {str(e)}")
             raise Exception("Database update failed")
 
-        # 3. Create Thread
+        # 3. 创建线程
         thread_data = {
             "thread_id": str(uuid.uuid4()), 
             "project_id": project_id, 
@@ -932,15 +1045,15 @@ async def initiate_agent_with_files(
             account_id=account_id,
         )
         
-        # Don't store agent_id in thread since threads are now agent-agnostic
-        # The agent selection will be handled per message/agent run
+        # 不在线程中存储agent_id，因为线程现在是代理无关的
+        # 代理选择将在每条消息/代理运行时处理
         if agent_config:
             logger.info(f"Using agent {agent_config['agent_id']} for this conversation (thread remains agent-agnostic)")
             structlog.contextvars.bind_contextvars(
                 agent_id=agent_config['agent_id'],
             )
         
-        # Store agent builder metadata if this is an agent builder session
+        # 如果是代理构建器会话，存储元数据
         if is_agent_builder:
             thread_data["metadata"] = {
                 "is_agent_builder": True,
@@ -955,10 +1068,10 @@ async def initiate_agent_with_files(
         thread_id = thread.data[0]['thread_id']
         logger.info(f"Created new thread: {thread_id}")
 
-        # Trigger Background Naming Task
+        # 触发后台命名任务
         asyncio.create_task(generate_and_update_project_name(project_id=project_id, prompt=prompt))
 
-        # 4. Upload Files to Sandbox (if any)
+        # 4. 上传文件到沙箱（如果有）
         message_content = prompt
         if files:
             successful_uploads = []
@@ -1011,7 +1124,7 @@ async def initiate_agent_with_files(
                 message_content += "\n\nThe following files failed to upload:\n"
                 for failed_file in failed_uploads: message_content += f"- {failed_file}\n"
 
-        # 5. Add initial user message to thread
+        # 5. 添加初始用户消息到线程
         message_id = str(uuid.uuid4())
         message_payload = {"role": "user", "content": message_content}
         await client.table('messages').insert({
@@ -1020,7 +1133,7 @@ async def initiate_agent_with_files(
             "created_at": datetime.now(timezone.utc).isoformat()
         }).execute()
 
-        # 6. Start Agent Run
+        # 6. 启动代理运行
         agent_run = await client.table('agent_runs').insert({
             "thread_id": thread_id, "status": "running",
             "started_at": datetime.now(timezone.utc).isoformat(),
@@ -1039,7 +1152,7 @@ async def initiate_agent_with_files(
             agent_run_id=agent_run_id,
         )
 
-        # Register run in Redis
+        # 在Redis中注册运行
         instance_key = f"active_run:{instance_id}:{agent_run_id}"
         try:
             await redis.set(instance_key, "running", ex=redis.REDIS_KEY_TTL)
@@ -1048,14 +1161,14 @@ async def initiate_agent_with_files(
 
         request_id = structlog.contextvars.get_contextvars().get('request_id')
 
-        # Run agent in background
+        # 在后台运行代理
         run_agent_background.send(
             agent_run_id=agent_run_id, thread_id=thread_id, instance_id=instance_id,
             project_id=project_id,
-            model_name=model_name,  # Already resolved above
+            model_name=model_name,  # 上面已经解析
             enable_thinking=enable_thinking, reasoning_effort=reasoning_effort,
             stream=stream, enable_context_manager=enable_context_manager,
-            agent_config=agent_config,  # Pass agent configuration
+            agent_config=agent_config,  # 传递代理配置
             is_agent_builder=is_agent_builder,
             target_agent_id=target_agent_id,
             request_id=request_id,
@@ -1065,7 +1178,7 @@ async def initiate_agent_with_files(
 
     except Exception as e:
         logger.error(f"Error in agent initiation: {str(e)}\n{traceback.format_exc()}")
-        # TODO: Clean up created project/thread if initiation fails mid-way
+        # TODO: 如果初始化中途失败，清理创建的项目/线程
         raise HTTPException(status_code=500, detail=f"Failed to initiate agent session: {str(e)}")
 
 # Custom agents
