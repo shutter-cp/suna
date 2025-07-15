@@ -34,6 +34,15 @@ db = DBConnection()
 instance_id = "single"
 
 async def initialize():
+    """
+    初始化agent API，从主API获取资源
+    功能：
+    1. 设置全局变量(db, instance_id, _initialized)
+    2. 如果instance_id未设置，生成一个8字符的UUID作为实例ID
+    3. 初始化Redis异步连接
+    4. 初始化数据库连接
+    5. 标记初始化完成状态
+    """
     """Initialize the agent API with resources from the main API."""
     global db, instance_id, _initialized
 
@@ -81,25 +90,33 @@ async def run_agent_background(
         logger.critical(f"Failed to initialize Redis connection: {e}")
         raise e
 
-    # Idempotency check: prevent duplicate runs
+    # 幂等性检查：防止重复运行
+    # 创建Redis锁键，格式为"agent_run_lock:{agent_run_id}"
     run_lock_key = f"agent_run_lock:{agent_run_id}"
     
-    # Try to acquire a lock for this agent run
+    # 尝试获取当前代理运行的锁
+    # 使用NX参数确保只有锁不存在时才能设置成功
+    # 设置过期时间为redis.REDIS_KEY_TTL
     lock_acquired = await redis.set(run_lock_key, instance_id, nx=True, ex=redis.REDIS_KEY_TTL)
     
     if not lock_acquired:
-        # Check if the run is already being handled by another instance
+        # 如果获取锁失败，检查是否已有其他实例在处理此运行
         existing_instance = await redis.get(run_lock_key)
         if existing_instance:
+            # 如果锁已存在且有值，说明其他实例正在处理
+            # 处理字节类型和字符串类型的existing_instance
             logger.info(f"Agent run {agent_run_id} is already being processed by instance {existing_instance.decode() if isinstance(existing_instance, bytes) else existing_instance}. Skipping duplicate execution.")
             return
         else:
-            # Lock exists but no value, try to acquire again
+            # 锁存在但没有值，可能是异常情况，再次尝试获取锁
             lock_acquired = await redis.set(run_lock_key, instance_id, nx=True, ex=redis.REDIS_KEY_TTL)
             if not lock_acquired:
+                # 如果第二次尝试仍然失败，记录日志并跳过执行
                 logger.info(f"Agent run {agent_run_id} is already being processed by another instance. Skipping duplicate execution.")
                 return
 
+    # 成功获取锁后，设置Sentry的线程ID标签
+    # 用于错误追踪和日志关联
     sentry.sentry.set_tag("thread_id", thread_id)
 
     logger.info(f"Starting background agent run: {agent_run_id} for thread: {thread_id} (Instance: {instance_id})")
@@ -124,7 +141,7 @@ async def run_agent_background(
     stop_checker = None
     stop_signal_received = False
 
-    # Define Redis keys and channels
+    # 定义Redis键和通道名称
     response_list_key = f"agent_run:{agent_run_id}:responses"
     response_channel = f"agent_run:{agent_run_id}:new_response"
     instance_control_channel = f"agent_run:{agent_run_id}:control:{instance_id}"
@@ -132,30 +149,53 @@ async def run_agent_background(
     instance_active_key = f"active_run:{instance_id}:{agent_run_id}"
 
     async def check_for_stop_signal():
-        nonlocal stop_signal_received
-        if not pubsub: return
+        """
+        检查停止信号的异步函数
+        功能：
+        1. 监听Redis控制通道的STOP信号
+        2. 定期刷新活动键的TTL
+        3. 处理取消和异常情况
+        """
+        nonlocal stop_signal_received  # 声明要修改的外部变量
+        if not pubsub: return  # 如果pubsub未初始化则直接返回
+        
         try:
             while not stop_signal_received:
+                # 从pubsub获取消息，忽略订阅消息，超时0.5秒
                 message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.5)
                 if message and message.get("type") == "message":
                     data = message.get("data")
+                    # 处理字节类型的数据
                     if isinstance(data, bytes): data = data.decode('utf-8')
                     if data == "STOP":
+                        # 收到STOP信号，设置标志并跳出循环
                         logger.info(f"Received STOP signal for agent run {agent_run_id} (Instance: {instance_id})")
                         stop_signal_received = True
                         break
-                # Periodically refresh the active run key TTL
-                if total_responses % 50 == 0: # Refresh every 50 responses or so
-                    try: await redis.expire(instance_active_key, redis.REDIS_KEY_TTL)
-                    except Exception as ttl_err: logger.warning(f"Failed to refresh TTL for {instance_active_key}: {ttl_err}")
-                await asyncio.sleep(0.1) # Short sleep to prevent tight loop
+                # 每处理50个响应后刷新活动键的TTL
+                if total_responses % 50 == 0:
+                    try: 
+                        await redis.expire(instance_active_key, redis.REDIS_KEY_TTL)
+                    except Exception as ttl_err: 
+                        logger.warning(f"Failed to refresh TTL for {instance_active_key}: {ttl_err}")
+                # 短暂休眠避免CPU占用过高
+                await asyncio.sleep(0.1)
         except asyncio.CancelledError:
+            # 任务被取消时的处理
             logger.info(f"Stop signal checker cancelled for {agent_run_id} (Instance: {instance_id})")
         except Exception as e:
+            # 其他异常处理
             logger.error(f"Error in stop signal checker for {agent_run_id}: {e}", exc_info=True)
-            stop_signal_received = True # Stop the run if the checker fails
+            stop_signal_received = True  # 发生异常时停止运行
 
-    trace = langfuse.trace(name="agent_run", id=agent_run_id, session_id=thread_id, metadata={"project_id": project_id, "instance_id": instance_id})
+    # 创建Langfuse跟踪记录
+    # 包含运行名称、ID、会话ID和元数据(项目ID和实例ID)
+    trace = langfuse.trace(
+        name="agent_run", 
+        id=agent_run_id, 
+        session_id=thread_id, 
+        metadata={"project_id": project_id, "instance_id": instance_id}
+    )
     try:
         # Setup Pub/Sub listener for control signals
         pubsub = await redis.create_pubsub()
