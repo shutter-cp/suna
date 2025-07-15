@@ -36,14 +36,14 @@ REDIS_RESPONSE_LIST_TTL = 3600 * 24
 
 
 class AgentStartRequest(BaseModel):
-    """代理启动请求模型
+    """Agent启动请求
     Attributes:
         model_name: 可选模型名称，默认为None，将从config.MODEL_TO_USE中设置
         enable_thinking: 是否启用思考模式，默认为False
         reasoning_effort: 推理努力程度，默认为'low'
         stream: 是否启用流式响应，默认为True
         enable_context_manager: 是否启用上下文管理器，默认为False
-        agent_id: 可选的自定义代理ID
+        agent_id: 可选的自定义AgentID
     """
     model_name: Optional[str] = None  # Will be set from config.MODEL_TO_USE in the endpoint
     enable_thinking: Optional[bool] = False
@@ -53,25 +53,25 @@ class AgentStartRequest(BaseModel):
     agent_id: Optional[str] = None  # Custom agent to use
 
 class InitiateAgentResponse(BaseModel):
-    """初始化代理响应模型
+    """初始化Agent响应
     Attributes:
         thread_id: 线程ID
-        agent_run_id: 可选的代理运行ID
+        agent_run_id: 可选的Agent运行ID
     """
     thread_id: str
     agent_run_id: Optional[str] = None
 
 class AgentCreateRequest(BaseModel):
-    """创建代理请求模型
+    """创建Agent请求
     Attributes:
-        name: 代理名称
-        description: 可选的代理描述
+        name: Agent名称
+        description: 可选的Agent描述
         system_prompt: 系统提示
         configured_mcps: 可选的配置的MCP列表
         custom_mcps: 可选的自定义MCP列表
         agentpress_tools: 可选的AgentPress工具
         is_default: 是否默认版本，默认为False
-        avatar: 可选的代理头像
+        avatar: 可选的Agent头像
     """
     name: str
     description: Optional[str] = None
@@ -84,10 +84,10 @@ class AgentCreateRequest(BaseModel):
     avatar_color: Optional[str] = None
 
 class AgentVersionResponse(BaseModel):
-    """代理版本响应模型
+    """Agent版本响应
     Attributes:
         version_id: 版本ID
-        agent_id: 代理ID
+        agent_id: AgentID
         version_number: 版本号
         version_name: 版本名称
         system_prompt: 系统提示
@@ -113,7 +113,7 @@ class AgentVersionResponse(BaseModel):
     created_by: Optional[str] = None
 
 class AgentVersionCreateRequest(BaseModel):
-    """创建代理版本请求模型
+    """创建Agent版本请求
     Attributes:
         version_name: 版本名称
         system_prompt: 系统提示
@@ -128,16 +128,16 @@ class AgentVersionCreateRequest(BaseModel):
     agentpress_tools: Optional[Dict[str, Any]] = {}
 
 class AgentUpdateRequest(BaseModel):
-    """更新代理请求模型
+    """更新Agent请求
     Attributes:
-        name: 可选的代理名称
-        description: 可选的代理描述
+        name: 可选的Agent名称
+        description: 可选的Agent描述
         system_prompt: 可选的系统提示
         configured_mcps: 可选的配置的MCP列表
         custom_mcps: 可选的自定义MCP列表
         agentpress_tools: 可选的AgentPress工具
         is_default: 可选的是否默认版本
-        avatar: 可选的代理头像
+        avatar: 可选的Agent头像
     """
     name: Optional[str] = None
     description: Optional[str] = None
@@ -150,19 +150,19 @@ class AgentUpdateRequest(BaseModel):
     avatar_color: Optional[str] = None
 
 class AgentResponse(BaseModel):
-    """代理响应模型
+    """Agent响应
     Attributes:
-        agent_id: 代理ID
+        agent_id: AgentID
         account_id: 账户ID
-        name: 代理名称
-        description: 可选的代理描述
+        name: Agent名称
+        description: 可选的Agent描述
         system_prompt: 系统提示
         configured_mcps: 配置的MCP列表
         custom_mcps: 自定义MCP列表
         agentpress_tools: AgentPress工具
         is_default: 是否默认版本
-        avatar: 可选的代理头像
-        avatar_color: 可选的代理头像颜色
+        avatar: 可选的Agent头像
+        avatar_color: 可选的Agent头像颜色
         created_at: 创建时间
         updated_at: 更新时间
         is_public: 可选的是否公开
@@ -195,7 +195,7 @@ class AgentResponse(BaseModel):
     current_version: Optional[AgentVersionResponse] = None
 
 class PaginationInfo(BaseModel):
-    """分页信息模型
+    """分页信息
     Attributes:
         page: 当前页码
         limit: 每页数量
@@ -208,18 +208,18 @@ class PaginationInfo(BaseModel):
     pages: int
 
 class AgentsResponse(BaseModel):
-    """代理列表响应模型
+    """Agent列表响应
     Attributes:
-        agents: 代理列表
+        agents: Agent列表
         pagination: 分页信息
     """
     agents: List[AgentResponse]
     pagination: PaginationInfo
 
 class ThreadAgentResponse(BaseModel):
-    """线程代理响应模型
+    """线程Agent响应
     Attributes:
-        agent: 可选的代理
+        agent: 可选的Agent
         source: 来源
         message: 消息
     """
@@ -231,45 +231,72 @@ def initialize(
     _db: DBConnection,
     _instance_id: Optional[str] = None
 ):
-    """Initialize the agent API with resources from the main API."""
+    """Initialize the agent API with resources from the main API.
+    
+    Args:
+        _db: 数据库连接对象，用于Agent API访问数据库
+        _instance_id: 可选参数，如果提供则使用指定的实例ID，否则生成一个新的
+    """
+    # 声明全局变量，用于在整个模块中共享数据库连接和实例ID
     global db, instance_id
+    
+    # 设置数据库连接
     db = _db
 
-    # Use provided instance_id or generate a new one
+    # 处理实例ID：使用提供的或生成新的
     if _instance_id:
+        # 如果提供了_instance_id，则直接使用
         instance_id = _instance_id
     else:
-        # Generate instance ID
+        # 否则生成一个新的UUID并取前8位作为实例ID
         instance_id = str(uuid.uuid4())[:8]
 
+    # 记录初始化日志
     logger.info(f"Initialized agent API with instance ID: {instance_id}")
 
 async def cleanup():
-    """Clean up resources and stop running agents on shutdown."""
+    """Clean up resources and stop running agents on shutdown.
+    
+    功能说明：
+        1. 清理当前实例的所有运行中的Agent
+        2. 关闭Redis连接
+        3. 记录清理过程日志
+    """
+    # 记录清理开始日志
     logger.info("Starting cleanup of agent API resources")
 
-    # Use the instance_id to find and clean up this instance's keys
+    # 使用instance_id查找并清理当前实例的keys
     try:
-        if instance_id: # Ensure instance_id is set
+        # 检查instance_id是否已设置
+        if instance_id: 
+            # 查找所有匹配active_run:{instance_id}:*模式的key
             running_keys = await redis.keys(f"active_run:{instance_id}:*")
+            # 记录找到的运行中Agent数量
             logger.info(f"Found {len(running_keys)} running agent runs for instance {instance_id} to clean up")
 
+            # 遍历所有运行中的Agent
             for key in running_keys:
-                # Key format: active_run:{instance_id}:{agent_run_id}
+                # key格式: active_run:{instance_id}:{agent_run_id}
                 parts = key.split(":")
                 if len(parts) == 3:
+                    # 获取agent_run_id
                     agent_run_id = parts[2]
+                    # 停止Agent运行，并传递关闭原因
                     await stop_agent_run(agent_run_id, error_message=f"Instance {instance_id} shutting down")
                 else:
+                    # 记录格式不正确的key
                     logger.warning(f"Unexpected key format found: {key}")
         else:
+            # 记录instance_id未设置的警告
             logger.warning("Instance ID not set, cannot clean up instance-specific agent runs.")
 
     except Exception as e:
+        # 捕获并记录清理过程中的异常
         logger.error(f"Failed to clean up running agent runs: {str(e)}")
 
-    # Close Redis connection
+    # 关闭Redis连接
     await redis.close()
+    # 记录清理完成日志
     logger.info("Completed cleanup of agent API resources")
 
 async def stop_agent_run(agent_run_id: str, error_message: Optional[str] = None):
@@ -913,23 +940,23 @@ async def initiate_agent_with_files(
     reasoning_effort: Optional[str] = Form("low"),  # 推理努力程度
     stream: Optional[bool] = Form(True),  # 是否启用流式响应
     enable_context_manager: Optional[bool] = Form(False),  # 是否启用上下文管理器
-    agent_id: Optional[str] = Form(None),  # 可选代理ID
+    agent_id: Optional[str] = Form(None),  # 可选AgentID
     files: List[UploadFile] = File(default=[]),  # 上传的文件列表
-    is_agent_builder: Optional[bool] = Form(False),  # 是否为代理构建器模式
-    target_agent_id: Optional[str] = Form(None),  # 目标代理ID
+    is_agent_builder: Optional[bool] = Form(False),  # 是否为Agent构建器模式
+    target_agent_id: Optional[str] = Form(None),  # 目标AgentID
     user_id: str = Depends(get_current_user_id_from_jwt)  # 从JWT获取的用户ID
 ):
     """
-    初始化一个新的代理会话，支持可选的文件附件
+    初始化一个新的Agent会话，支持可选的文件附件
     
     主要流程：
     1. 验证实例ID并解析模型名称
-    2. 加载代理配置（自定义或默认）
+    2. 加载Agent配置（自定义或默认）
     3. 检查模型使用权限和账单状态
     4. 创建项目、沙箱和线程
     5. 上传文件到沙箱（如果有）
     6. 添加初始用户消息
-    7. 启动代理运行
+    7. 启动Agent运行
     """
     global instance_id # 确保instance_id可访问
     if not instance_id:
@@ -955,7 +982,7 @@ async def initiate_agent_with_files(
     client = await db.client
     account_id = user_id # 在Basejump中，个人account_id与user_id相同
     
-    # 如果提供了agent_id，则加载代理配置
+    # 如果提供了agent_id，则加载Agent配置
     agent_config = None
     if agent_id:
         agent_result = await client.table('agents').select('*').eq('agent_id', agent_id).eq('account_id', account_id).execute()
@@ -964,7 +991,7 @@ async def initiate_agent_with_files(
         agent_config = agent_result.data[0]
         logger.info(f"Using custom agent: {agent_config['name']} ({agent_id})")
     else:
-        # 尝试获取账户的默认代理
+        # 尝试获取账户的默认Agent
         default_agent_result = await client.table('agents').select('*').eq('account_id', account_id).eq('is_default', True).execute()
         if default_agent_result.data:
             agent_config = default_agent_result.data[0]
@@ -1045,15 +1072,15 @@ async def initiate_agent_with_files(
             account_id=account_id,
         )
         
-        # 不在线程中存储agent_id，因为线程现在是代理无关的
-        # 代理选择将在每条消息/代理运行时处理
+        # 不在线程中存储agent_id，因为线程现在是Agent无关的
+        # Agent选择将在每条消息/Agent运行时处理
         if agent_config:
             logger.info(f"Using agent {agent_config['agent_id']} for this conversation (thread remains agent-agnostic)")
             structlog.contextvars.bind_contextvars(
                 agent_id=agent_config['agent_id'],
             )
         
-        # 如果是代理构建器会话，存储元数据
+        # 如果是Agent构建器会话，存储元数据
         if is_agent_builder:
             thread_data["metadata"] = {
                 "is_agent_builder": True,
@@ -1133,7 +1160,7 @@ async def initiate_agent_with_files(
             "created_at": datetime.now(timezone.utc).isoformat()
         }).execute()
 
-        # 6. 启动代理运行
+        # 6. 启动Agent运行
         agent_run = await client.table('agent_runs').insert({
             "thread_id": thread_id, "status": "running",
             "started_at": datetime.now(timezone.utc).isoformat(),
@@ -1161,14 +1188,14 @@ async def initiate_agent_with_files(
 
         request_id = structlog.contextvars.get_contextvars().get('request_id')
 
-        # 在后台运行代理
+        # 在后台运行Agent
         run_agent_background.send(
             agent_run_id=agent_run_id, thread_id=thread_id, instance_id=instance_id,
             project_id=project_id,
             model_name=model_name,  # 上面已经解析
             enable_thinking=enable_thinking, reasoning_effort=reasoning_effort,
             stream=stream, enable_context_manager=enable_context_manager,
-            agent_config=agent_config,  # 传递代理配置
+            agent_config=agent_config,  # 传递Agent配置
             is_agent_builder=is_agent_builder,
             target_agent_id=target_agent_id,
             request_id=request_id,
