@@ -454,30 +454,37 @@ async def run_agent(
         temporary_message = None  # 初始化临时消息
         temp_message_content_list = [] # 用于保存文本/图像块的列表
 
-        # Get the latest browser_state message
+        # 获取最新的浏览器状态消息
         latest_browser_state_msg = await client.table('messages').select('*').eq('thread_id', thread_id).eq('type', 'browser_state').order('created_at', desc=True).limit(1).execute()
+        
+        # 如果存在浏览器状态消息
         if latest_browser_state_msg.data and len(latest_browser_state_msg.data) > 0:
             try:
+                # 解析浏览器状态内容
                 browser_content = latest_browser_state_msg.data[0]["content"]
+                # 如果内容是字符串格式，转换为JSON对象
                 if isinstance(browser_content, str):
                     browser_content = json.loads(browser_content)
+                
+                # 获取截图数据（base64格式和URL格式）
                 screenshot_base64 = browser_content.get("screenshot_base64")
                 screenshot_url = browser_content.get("image_url")
                 
-                # Create a copy of the browser state without screenshot data
+                # 创建不包含截图数据的浏览器状态文本副本
                 browser_state_text = browser_content.copy()
                 browser_state_text.pop('screenshot_base64', None)
                 browser_state_text.pop('image_url', None)
 
+                # 如果有浏览器状态文本，添加到临时消息列表
                 if browser_state_text:
                     temp_message_content_list.append({
                         "type": "text",
                         "text": f"The following is the current state of the browser:\n{json.dumps(browser_state_text, indent=2)}"
                     })
                 
-                # Only add screenshot if model is not Gemini, Anthropic, or OpenAI
+                # 仅当模型不是Gemini、Anthropic或OpenAI时添加截图
                 if 'gemini' in model_name.lower() or 'anthropic' in model_name.lower() or 'openai' in model_name.lower():
-                    # Prioritize screenshot_url if available
+                    # 优先使用截图URL（如果可用）
                     if screenshot_url:
                         temp_message_content_list.append({
                             "type": "image_url",
@@ -486,10 +493,11 @@ async def run_agent(
                                 "format": "image/jpeg"
                             }
                         })
+                        # 如果有追踪器，记录事件
                         if trace:
                             trace.event(name="screenshot_url_added_to_temporary_message", level="DEFAULT", status_message=(f"Screenshot URL added to temporary message."))
+                    # 如果没有URL但有base64数据，使用base64格式
                     elif screenshot_base64:
-                        # Fallback to base64 if URL not available
                         temp_message_content_list.append({
                             "type": "image_url",
                             "image_url": {
@@ -499,15 +507,18 @@ async def run_agent(
                         if trace:
                             trace.event(name="screenshot_base64_added_to_temporary_message", level="WARNING", status_message=(f"Screenshot base64 added to temporary message. Prefer screenshot_url if available."))
                     else:
+                        # 没有截图数据时记录警告
                         logger.warning("Browser state found but no screenshot data.")
                         if trace:
                             trace.event(name="browser_state_found_but_no_screenshot_data", level="WARNING", status_message=(f"Browser state found but no screenshot data."))
                 else:
+                    # 不支持的模型类型记录警告
                     logger.warning("Model is Gemini, Anthropic, or OpenAI, so not adding screenshot to temporary message.")
                     if trace:
                         trace.event(name="model_is_gemini_anthropic_or_openai", level="WARNING", status_message=(f"Model is Gemini, Anthropic, or OpenAI, so not adding screenshot to temporary message."))
 
             except Exception as e:
+                # 浏览器状态解析错误处理
                 logger.error(f"Error parsing browser state: {e}")
                 if trace:
                     trace.event(name="error_parsing_browser_state", level="ERROR", status_message=(f"{e}"))
