@@ -50,51 +50,65 @@ async def run_agent(
     is_agent_builder: Optional[bool] = False,
     target_agent_id: Optional[str] = None
 ):
-    """Run the development agent with specified configuration."""
+    """运行开发代理并指定配置。"""
+    # 记录启动日志，显示使用的模型名称
     logger.info(f"🚀 Starting agent with model: {model_name}")
+    # 如果有自定义代理配置，记录代理名称
     if agent_config:
         logger.info(f"Using custom agent: {agent_config.get('name', 'Unknown')}")
 
+    # 如果没有跟踪信息，创建一个新的跟踪
     if not trace:
         trace = langfuse.trace(name="run_agent", session_id=thread_id, metadata={"project_id": project_id})
+    # 初始化线程管理器
     thread_manager = ThreadManager(trace=trace, is_agent_builder=is_agent_builder or False, target_agent_id=target_agent_id, agent_config=agent_config)
 
+    # 获取数据库客户端
     client = await thread_manager.db.client
 
-    # Get account ID from thread for billing checks
+    # 从线程中获取账户ID用于计费检查
     account_id = await get_account_id_from_thread(client, thread_id)
     if not account_id:
         raise ValueError("Could not determine account ID for thread")
 
-    # Get sandbox info from project
+    # 从项目中获取沙盒信息
     project = await client.table('projects').select('*').eq('project_id', project_id).execute()
     if not project.data or len(project.data) == 0:
         raise ValueError(f"Project {project_id} not found")
 
+    # 获取项目数据并检查沙盒配置
     project_data = project.data[0]
     sandbox_info = project_data.get('sandbox', {})
     if not sandbox_info.get('id'):
         raise ValueError(f"No sandbox found for project {project_id}")
 
-    # Initialize tools with project_id instead of sandbox object
-    # This ensures each tool independently verifies it's operating on the correct project
+    # 使用project_id而不是sandbox对象初始化工具
+    # 这样可以确保每个工具都能独立验证它是否在正确的项目上运行
     
-    # Get enabled tools from agent config, or use defaults
+    # 从代理配置中获取启用的工具，如果没有则使用默认配置
     enabled_tools = None
+    # 检查是否有代理配置且包含agentpress_tools字段
     if agent_config and 'agentpress_tools' in agent_config:
+        # 从配置中获取工具列表
         enabled_tools = agent_config['agentpress_tools']
+        # 记录日志，表示使用了自定义工具配置
         logger.info(f"Using custom tool configuration from agent")
     
 
+    # 检查是否是代理构建器模式
     if is_agent_builder:
+        # 导入代理构建器所需的各种工具类
         from agent.tools.agent_builder_tools.agent_config_tool import AgentConfigTool
         from agent.tools.agent_builder_tools.mcp_search_tool import MCPSearchTool
         from agent.tools.agent_builder_tools.credential_profile_tool import CredentialProfileTool
         from agent.tools.agent_builder_tools.workflow_tool import WorkflowTool
         from agent.tools.agent_builder_tools.trigger_tool import TriggerTool
+        
+        # 导入数据库连接并初始化
         from services.supabase import DBConnection
         db = DBConnection()
          
+        # 向线程管理器添加各种工具
         thread_manager.add_tool(AgentConfigTool, thread_manager=thread_manager, db_connection=db, agent_id=target_agent_id)
         thread_manager.add_tool(MCPSearchTool, thread_manager=thread_manager, db_connection=db, agent_id=target_agent_id)
         thread_manager.add_tool(CredentialProfileTool, thread_manager=thread_manager, db_connection=db, agent_id=target_agent_id)
@@ -102,24 +116,39 @@ async def run_agent(
         thread_manager.add_tool(TriggerTool, thread_manager=thread_manager, db_connection=db, agent_id=target_agent_id)
         
 
+    # 检查是否没有指定启用的工具
     if enabled_tools is None:
+        # 记录日志，表示将注册所有工具以获得完整的Suna功能
         logger.info("No agent specified - registering all tools for full Suna capabilities")
+        
+        # 注册所有可用的沙盒工具
         thread_manager.add_tool(SandboxShellTool, project_id=project_id, thread_manager=thread_manager)
         thread_manager.add_tool(SandboxFilesTool, project_id=project_id, thread_manager=thread_manager)
         thread_manager.add_tool(SandboxBrowserTool, project_id=project_id, thread_id=thread_id, thread_manager=thread_manager)
         thread_manager.add_tool(SandboxDeployTool, project_id=project_id, thread_manager=thread_manager)
         thread_manager.add_tool(SandboxExposeTool, project_id=project_id, thread_manager=thread_manager)
+        
+        # 注册消息相关工具
         thread_manager.add_tool(ExpandMessageTool, thread_id=thread_id, thread_manager=thread_manager)
         thread_manager.add_tool(MessageTool)
+        
+        # 注册其他功能工具
         thread_manager.add_tool(SandboxWebSearchTool, project_id=project_id, thread_manager=thread_manager)
         thread_manager.add_tool(SandboxVisionTool, project_id=project_id, thread_id=thread_id, thread_manager=thread_manager)
         thread_manager.add_tool(SandboxImageEditTool, project_id=project_id, thread_id=thread_id, thread_manager=thread_manager)
+        
+        # 如果有RapidAPI密钥，注册数据提供者工具
         if config.RAPID_API_KEY:
             thread_manager.add_tool(DataProvidersTool)
     else:
+        # 记录日志，表示将只注册启用的工具
         logger.info("Custom agent specified - registering only enabled tools")
+        
+        # 注册基础消息工具
         thread_manager.add_tool(ExpandMessageTool, thread_id=thread_id, thread_manager=thread_manager)
         thread_manager.add_tool(MessageTool)
+        
+        # 根据配置逐个检查并注册启用的工具
         if enabled_tools.get('sb_shell_tool', {}).get('enabled', False):
             thread_manager.add_tool(SandboxShellTool, project_id=project_id, thread_manager=thread_manager)
         if enabled_tools.get('sb_files_tool', {}).get('enabled', False):
@@ -134,32 +163,34 @@ async def run_agent(
             thread_manager.add_tool(SandboxWebSearchTool, project_id=project_id, thread_manager=thread_manager)
         if enabled_tools.get('sb_vision_tool', {}).get('enabled', False):
             thread_manager.add_tool(SandboxVisionTool, project_id=project_id, thread_id=thread_id, thread_manager=thread_manager)
+        
+        # 检查是否有RapidAPI密钥且数据提供者工具被启用
         if config.RAPID_API_KEY and enabled_tools.get('data_providers_tool', {}).get('enabled', False):
             thread_manager.add_tool(DataProvidersTool)
 
-    # Register MCP tool wrapper if agent has configured MCPs or custom MCPs
+    # 注册MCP工具包装器，如果代理配置了MCP或自定义MCP
     mcp_wrapper_instance = None
     if agent_config:
-        # Merge configured_mcps and custom_mcps
+        # 合并配置的MCP和自定义MCP
         all_mcps = []
         
-        # Add standard configured MCPs
+        # 添加标准配置的MCP
         if agent_config.get('configured_mcps'):
             all_mcps.extend(agent_config['configured_mcps'])
         
-        # Add custom MCPs
+        # 添加自定义MCP
         if agent_config.get('custom_mcps'):
             for custom_mcp in agent_config['custom_mcps']:
-                # Transform custom MCP to standard format
+                # 将自定义MCP转换为标准格式
                 custom_type = custom_mcp.get('customType', custom_mcp.get('type', 'sse'))
                 
-                # For Pipedream MCPs, ensure we have the user ID and proper config
+                # 对于Pipedream MCP，确保我们有用户ID和正确的配置
                 if custom_type == 'pipedream':
-                    # Get user ID from thread
+                    # 从线程获取用户ID
                     if 'config' not in custom_mcp:
                         custom_mcp['config'] = {}
                     
-                    # Get external_user_id from profile if not present
+                    # 如果不存在，从配置文件中获取external_user_id
                     if not custom_mcp['config'].get('external_user_id'):
                         profile_id = custom_mcp['config'].get('profile_id')
                         if profile_id:
@@ -169,7 +200,7 @@ async def run_agent(
                                 profile_db = DBConnection()
                                 profile_manager = get_profile_manager(profile_db)
                                 
-                                # Get the profile to retrieve external_user_id
+                                # 获取配置文件以检索external_user_id
                                 profile = await profile_manager.get_profile(account_id, profile_id)
                                 if profile:
                                     custom_mcp['config']['external_user_id'] = profile.external_user_id
@@ -179,9 +210,11 @@ async def run_agent(
                             except Exception as e:
                                 logger.error(f"Error retrieving external_user_id from profile {profile_id}: {e}")
                     
+                    # 处理headers中的x-pd-app-slug
                     if 'headers' in custom_mcp['config'] and 'x-pd-app-slug' in custom_mcp['config']['headers']:
                         custom_mcp['config']['app_slug'] = custom_mcp['config']['headers']['x-pd-app-slug']
                 
+                # 构建MCP配置对象
                 mcp_config = {
                     'name': custom_mcp['name'],
                     'qualifiedName': f"custom_{custom_type}_{custom_mcp['name'].replace(' ', '_').lower()}",
@@ -193,19 +226,24 @@ async def run_agent(
                 }
                 all_mcps.append(mcp_config)
         
+        # 如果有MCP配置，注册MCP工具包装器
         if all_mcps:
             logger.info(f"Registering MCP tool wrapper for {len(all_mcps)} MCP servers (including {len(agent_config.get('custom_mcps', []))} custom)")
             thread_manager.add_tool(MCPToolWrapper, mcp_configs=all_mcps)
             
+            # 查找MCP包装器实例
             for tool_name, tool_info in thread_manager.tool_registry.tools.items():
                 if isinstance(tool_info['instance'], MCPToolWrapper):
                     mcp_wrapper_instance = tool_info['instance']
                     break
             
+            # 初始化并注册MCP工具
             if mcp_wrapper_instance:
                 try:
                     await mcp_wrapper_instance.initialize_and_register_tools()
                     logger.info("MCP tools initialized successfully")
+                    
+                    # 获取并注册所有schema
                     updated_schemas = mcp_wrapper_instance.get_schemas()
                     logger.info(f"MCP wrapper has {len(updated_schemas)} schemas available")
                     for method_name, schema_list in updated_schemas.items():
@@ -218,72 +256,87 @@ async def run_agent(
                                     }
                                     logger.info(f"Registered dynamic MCP tool: {method_name}")
                     
-                    # Log all registered tools for debugging
+                    # 记录所有已注册的工具用于调试
                     all_tools = list(thread_manager.tool_registry.tools.keys())
                     logger.info(f"All registered tools after MCP initialization: {all_tools}")
+                    
+                    # 过滤出MCP工具
                     mcp_tools = [tool for tool in all_tools if tool not in ['call_mcp_tool', 'sb_files_tool', 'message_tool', 'expand_msg_tool', 'web_search_tool', 'sb_shell_tool', 'sb_vision_tool', 'sb_browser_tool', 'computer_use_tool', 'data_providers_tool', 'sb_deploy_tool', 'sb_expose_tool', 'update_agent_tool']]
                     logger.info(f"MCP tools registered: {mcp_tools}")
                 
                 except Exception as e:
                     logger.error(f"Failed to initialize MCP tools: {e}")
-                    # Continue without MCP tools if initialization fails
+                    # 如果初始化失败，继续运行但不使用MCP工具
 
-    # Prepare system prompt
-    # First, get the default system prompt
+    # 准备系统提示
+    # 首先获取默认系统提示
     if "gemini-2.5-flash" in model_name.lower() and "gemini-2.5-pro" not in model_name.lower():
+        # 如果是Gemini 2.5 Flash模型，使用专门的系统提示
         default_system_content = get_gemini_system_prompt()
     else:
-        # Use the original prompt - the LLM can only use tools that are registered
+        # 其他模型使用原始系统提示 - LLM只能使用已注册的工具
         default_system_content = get_system_prompt()
         
-    # Add sample response for non-anthropic models
+    # 为非Anthropic模型添加示例响应
     if "anthropic" not in model_name.lower():
+        # 从sample_responses目录读取示例响应
         sample_response_path = os.path.join(os.path.dirname(__file__), 'sample_responses/1.txt')
         with open(sample_response_path, 'r') as file:
             sample_response = file.read()
+        # 将示例响应附加到默认系统提示中
         default_system_content = default_system_content + "\n\n <sample_assistant_response>" + sample_response + "</sample_assistant_response>"
     
-    # Handle custom agent system prompt
+    # 处理自定义agent系统提示
     if agent_config and agent_config.get('system_prompt'):
+        # 如果有自定义系统提示，完全替换默认提示
         custom_system_prompt = agent_config['system_prompt'].strip()
         
-        # Completely replace the default system prompt with the custom one
-        # This prevents confusion and tool hallucination
+        # 这可以防止混淆和工具幻觉
         system_content = custom_system_prompt
         logger.info(f"Using ONLY custom agent system prompt for: {agent_config.get('name', 'Unknown')}")
     elif is_agent_builder:
+        # 如果是agent builder，使用专门的提示
         system_content = get_agent_builder_prompt()
         logger.info("Using agent builder system prompt")
     else:
-        # Use just the default system prompt
+        # 否则只使用默认系统提示
         system_content = default_system_content
         logger.info("Using default system prompt only")
     
+    # 检查知识库功能是否启用
     if await is_enabled("knowledge_base"):
         try:
+            # 初始化Supabase数据库连接
             from services.supabase import DBConnection
             kb_db = DBConnection()
             kb_client = await kb_db.client
             
+            # 获取当前agent ID（如果有）
             current_agent_id = agent_config.get('agent_id') if agent_config else None
             
+            # 调用Supabase存储过程获取知识库上下文
             kb_result = await kb_client.rpc('get_combined_knowledge_base_context', {
-                'p_thread_id': thread_id,
-                'p_agent_id': current_agent_id,
-                'p_max_tokens': 4000
+                'p_thread_id': thread_id,  # 当前线程ID
+                'p_agent_id': current_agent_id,  # 当前agent ID
+                'p_max_tokens': 4000  # 最大token限制
             }).execute()
             
+            # 如果有有效的知识库上下文数据
             if kb_result.data and kb_result.data.strip():
                 logger.info(f"Adding combined knowledge base context to system prompt for thread {thread_id}, agent {current_agent_id}")
+                # 将知识库上下文附加到系统提示中
                 system_content += "\n\n" + kb_result.data
             else:
                 logger.debug(f"No knowledge base context found for thread {thread_id}, agent {current_agent_id}")
                 
         except Exception as e:
+            # 捕获并记录知识库上下文加载过程中的任何错误
             logger.error(f"Error retrieving knowledge base context for thread {thread_id}: {e}")
 
 
+    # 检查是否存在配置的MCP工具且MCP包装器已初始化
     if agent_config and (agent_config.get('configured_mcps') or agent_config.get('custom_mcps')) and mcp_wrapper_instance and mcp_wrapper_instance._initialized:
+        # 初始化MCP工具信息头部
         mcp_info = "\n\n--- MCP Tools Available ---\n"
         mcp_info += "You have access to external MCP (Model Context Protocol) server tools.\n"
         mcp_info += "MCP tools can be called directly using their native function names in the standard function calling format:\n"
@@ -294,21 +347,21 @@ async def run_agent(
         mcp_info += '</invoke>\n'
         mcp_info += '</function_calls>\n\n'
         
-        # List available MCP tools
+        # 列出可用的MCP工具
         mcp_info += "Available MCP tools:\n"
         try:
-            # Get the actual registered schemas from the wrapper
+            # 从包装器获取实际注册的OpenAPI模式
             registered_schemas = mcp_wrapper_instance.get_schemas()
             for method_name, schema_list in registered_schemas.items():
                 if method_name == 'call_mcp_tool':
-                    continue  # Skip the fallback method
+                    continue  # 跳过回退方法
                     
-                # Get the schema info
+                # 解析每个模式的详细信息
                 for schema in schema_list:
                     if schema.schema_type == SchemaType.OPENAPI:
                         func_info = schema.schema.get('function', {})
                         description = func_info.get('description', 'No description available')
-                        # Extract server name from description if available
+                        # 从描述中提取服务器信息
                         server_match = description.find('(MCP Server: ')
                         if server_match != -1:
                             server_end = description.find(')', server_match)
@@ -316,9 +369,10 @@ async def run_agent(
                         else:
                             server_info = ''
                         
+                        # 添加工具名称和描述
                         mcp_info += f"- **{method_name}**: {description}\n"
                         
-                        # Show parameter info
+                        # 显示参数信息
                         params = func_info.get('parameters', {})
                         props = params.get('properties', {})
                         if props:
@@ -328,7 +382,7 @@ async def run_agent(
             logger.error(f"Error listing MCP tools: {e}")
             mcp_info += "- Error loading MCP tool list\n"
         
-        # Add critical instructions for using search results
+        # 添加关键使用说明
         mcp_info += "\n🚨 CRITICAL MCP TOOL RESULT INSTRUCTIONS 🚨\n"
         mcp_info += "When you use ANY MCP (Model Context Protocol) tools:\n"
         mcp_info += "1. ALWAYS read and use the EXACT results returned by the MCP tool\n"
@@ -342,6 +396,7 @@ async def run_agent(
         mcp_info += "\nIMPORTANT: MCP tool results are your PRIMARY and ONLY source of truth for external data!\n"
         mcp_info += "NEVER supplement MCP results with your training data or make assumptions beyond what the tools provide.\n"
         
+        # 将MCP信息添加到系统提示中
         system_content += mcp_info
     
     system_message = { "role": "system", "content": system_content }
@@ -349,6 +404,7 @@ async def run_agent(
     iteration_count = 0
     continue_execution = True
 
+    # 取得数据库最新用户消息
     latest_user_message = await client.table('messages').select('*').eq('thread_id', thread_id).eq('type', 'user').order('created_at', desc=True).limit(1).execute()
     if latest_user_message.data and len(latest_user_message.data) > 0:
         data = latest_user_message.data[0]['content']
@@ -360,34 +416,43 @@ async def run_agent(
     while continue_execution and iteration_count < max_iterations:
         iteration_count += 1
         logger.info(f"🔄 Running iteration {iteration_count} of {max_iterations}...")
-
-        # Billing check on each iteration - still needed within the iterations
+        
+        # 每次迭代都进行计费状态检查 - 在迭代过程中仍需检查
         can_run, message, subscription = await check_billing_status(client, account_id)
         if not can_run:
+            # 构建计费限制错误消息
             error_msg = f"Billing limit reached: {message}"
+            # 如果有跟踪器，记录计费限制事件
             if trace:
                 trace.event(name="billing_limit_reached", level="ERROR", status_message=(f"{error_msg}"))
-            # Yield a special message to indicate billing limit reached
+            # 生成一个特殊消息表示达到计费限制
             yield {
-                "type": "status",
-                "status": "stopped",
-                "message": error_msg
+                "type": "status",  # 消息类型为状态
+                "status": "stopped",  # 状态为停止
+                "message": error_msg  # 包含错误消息
             }
             break
-        # Check if last message is from assistant using direct Supabase query
+        # 检查最后一条消息是否来自助手 - 使用Supabase直接查询
         latest_message = await client.table('messages').select('*').eq('thread_id', thread_id).in_('type', ['assistant', 'tool', 'user']).order('created_at', desc=True).limit(1).execute()
+        
+        # 如果存在消息数据且不为空
         if latest_message.data and len(latest_message.data) > 0:
             message_type = latest_message.data[0].get('type')
+            
+            # 如果最后一条消息来自助手，则停止执行
             if message_type == 'assistant':
                 logger.info(f"Last message was from assistant, stopping execution")
+                
+                # 如果有跟踪功能，记录事件
                 if trace:
                     trace.event(name="last_message_from_assistant", level="DEFAULT", status_message=(f"Last message was from assistant, stopping execution"))
+                
                 continue_execution = False
                 break
 
-        # ---- Temporary Message Handling (Browser State & Image Context) ----
-        temporary_message = None
-        temp_message_content_list = [] # List to hold text/image blocks
+        # ---- 临时消息处理（浏览器状态和图像上下文） ----
+        temporary_message = None  # 初始化临时消息
+        temp_message_content_list = [] # 用于保存文本/图像块的列表
 
         # Get the latest browser_state message
         latest_browser_state_msg = await client.table('messages').select('*').eq('thread_id', thread_id).eq('type', 'browser_state').order('created_at', desc=True).limit(1).execute()

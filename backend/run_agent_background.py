@@ -197,22 +197,26 @@ async def run_agent_background(
         metadata={"project_id": project_id, "instance_id": instance_id}
     )
     try:
-        # Setup Pub/Sub listener for control signals
+        # 设置Pub/Sub监听器用于接收控制信号
         pubsub = await redis.create_pubsub()
         try:
+            # 重试订阅控制频道（实例控制频道和全局控制频道）
             await retry(lambda: pubsub.subscribe(instance_control_channel, global_control_channel))
         except Exception as e:
+            # 订阅失败时记录错误日志
             logger.error(f"Redis failed to subscribe to control channels: {e}", exc_info=True)
             raise e
 
+        # 记录成功订阅的调试信息
         logger.debug(f"Subscribed to control channels: {instance_control_channel}, {global_control_channel}")
+        # 创建异步任务检查停止信号
         stop_checker = asyncio.create_task(check_for_stop_signal())
 
-        # Ensure active run key exists and has TTL
+        # 设置实例活跃键并添加TTL（生存时间）
         await redis.set(instance_active_key, "running", ex=redis.REDIS_KEY_TTL)
 
 
-        # Initialize agent generator
+        # 初始化agent生成器
         agent_gen = run_agent(
             thread_id=thread_id, project_id=project_id, stream=stream,
             model_name=model_name,
