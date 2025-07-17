@@ -209,28 +209,27 @@ class ThreadManager:
         enable_context_manager: bool = True,
         generation: Optional[StatefulGenerationClient] = None,
     ) -> Union[Dict[str, Any], AsyncGenerator]:
-        """Run a conversation thread with LLM integration and tool execution.
+        """运行一个包含LLM集成和工具执行的对话线程。
 
-        Args:
-            thread_id: The ID of the thread to run
-            system_prompt: System message to set the assistant's behavior
-            stream: Use streaming API for the LLM response
-            temporary_message: Optional temporary user message for this run only
-            llm_model: The name of the LLM model to use
-            llm_temperature: Temperature parameter for response randomness (0-1)
-            llm_max_tokens: Maximum tokens in the LLM response
-            processor_config: Configuration for the response processor
-            tool_choice: Tool choice preference ("auto", "required", "none")
-            native_max_auto_continues: Maximum number of automatic continuations when
-                                      finish_reason="tool_calls" (0 disables auto-continue)
-            max_xml_tool_calls: Maximum number of XML tool calls to allow (0 = no limit)
-            include_xml_examples: Whether to include XML tool examples in the system prompt
-            enable_thinking: Whether to enable thinking before making a decision
-            reasoning_effort: The effort level for reasoning
-            enable_context_manager: Whether to enable automatic context summarization.
+        参数:
+            thread_id: 要运行的线程ID
+            system_prompt: 设置助手行为的系统消息
+            stream: 是否使用LLM的流式API
+            temporary_message: 仅本次运行可选的临时用户消息
+            llm_model: 使用的LLM模型名称
+            llm_temperature: 响应随机性的温度参数(0-1)
+            llm_max_tokens: LLM响应的最大token数
+            processor_config: 响应处理器的配置
+            tool_choice: 工具选择偏好("auto", "required", "none")
+            native_max_auto_continues: 当finish_reason="tool_calls"时的最大自动继续次数(0表示禁用自动继续)
+            max_xml_tool_calls: 允许的最大XML工具调用次数(0表示无限制)
+            include_xml_examples: 是否在系统提示中包含XML工具示例
+            enable_thinking: 是否在决策前启用思考
+            reasoning_effort: 推理努力级别
+            enable_context_manager: 是否启用自动上下文摘要
 
-        Returns:
-            An async generator yielding response chunks or error dict
+        返回:
+            一个异步生成器，产生响应块或错误字典
         """
 
         logger.info(f"Starting thread execution for thread {thread_id}")
@@ -242,49 +241,48 @@ class ThreadManager:
         # Log model info
         logger.info(f"🤖 Thread {thread_id}: Using model {llm_model}")
 
-        # Ensure processor_config is not None
+        # 确保processor_config不为None，否则使用默认配置
         config = processor_config or ProcessorConfig()
 
-        # Apply max_xml_tool_calls if specified and not already set in config
+        # 如果指定了max_xml_tool_calls且配置中未设置，则应用该值
         if max_xml_tool_calls > 0 and not config.max_xml_tool_calls:
             config.max_xml_tool_calls = max_xml_tool_calls
 
-        # Create a working copy of the system prompt to potentially modify
+        # 创建系统提示的工作副本以便修改
         working_system_prompt = system_prompt.copy()
 
-        # Add XML examples to system prompt if requested, do this only ONCE before the loop
+        # 如果需要添加XML示例且配置启用了XML工具调用
         if include_xml_examples and config.xml_tool_calling:
+            # 从工具注册表获取XML示例
             xml_examples = self.tool_registry.get_xml_examples()
             if xml_examples:
+                # 构建XML工具调用说明内容
                 examples_content = """
---- XML TOOL CALLING ---
+ --- XML TOOL CALLING ---
 
-In this environment you have access to a set of tools you can use to answer the user's question. The tools are specified in XML format.
-Format your tool calls using the specified XML tags. Place parameters marked as 'attribute' within the opening tag (e.g., `<tag attribute='value'>`). Place parameters marked as 'content' between the opening and closing tags. Place parameters marked as 'element' within their own child tags (e.g., `<tag><element>value</element></tag>`). Refer to the examples provided below for the exact structure of each tool.
-String and scalar parameters should be specified as attributes, while content goes between tags.
-Note that spaces for string values are not stripped. The output is parsed with regular expressions.
+ In this environment you have access to a set of tools you can use to answer the user's question. The tools are specified in XML format.
+ Format your tool calls using the specified XML tags. Place parameters marked as 'attribute' within the opening tag (e.g., `<tag attribute='value'>`). Place parameters marked as 'content' between the opening and closing tags. Place parameters marked as 'element' within their own child tags (e.g., `<tag><element>value</element></tag>`). Refer to the examples provided below for the exact structure of each tool.
+ String and scalar parameters should be specified as attributes, while content goes between tags.
+ Note that spaces for string values are not stripped. The output is parsed with regular expressions.
 
-Here are the XML tools available with examples:
-"""
+ Here are the XML tools available with examples:
+                """
+                # 添加每个工具的示例
                 for tag_name, example in xml_examples.items():
-                    examples_content += f"<{tag_name}> Example: {example}\\n"
+                    examples_content += f"<{tag_name}> Example: {example}\n"
 
-                # # Save examples content to a file
-                # try:
-                #     with open('xml_examples.txt', 'w') as f:
-                #         f.write(examples_content)
-                #     logger.debug("Saved XML examples to xml_examples.txt")
-                # except Exception as e:
-                #     logger.error(f"Failed to save XML examples to file: {e}")
-
+                # 获取系统提示内容
                 system_content = working_system_prompt.get('content')
 
+                # 根据系统提示内容的类型进行处理
                 if isinstance(system_content, str):
+                    # 字符串类型直接追加
                     working_system_prompt['content'] += examples_content
                     logger.debug("Appended XML examples to string system prompt content.")
                 elif isinstance(system_content, list):
+                    # 列表类型查找第一个文本块追加
                     appended = False
-                    for item in working_system_prompt['content']: # Modify the copy
+                    for item in working_system_prompt['content']:
                         if isinstance(item, dict) and item.get('type') == 'text' and 'text' in item:
                             item['text'] += examples_content
                             logger.debug("Appended XML examples to the first text block in list system prompt content.")
@@ -294,63 +292,64 @@ Here are the XML tools available with examples:
                         logger.warning("System prompt content is a list but no text block found to append XML examples.")
                 else:
                     logger.warning(f"System prompt content is of unexpected type ({type(system_content)}), cannot add XML examples.")
-        # Control whether we need to auto-continue due to tool_calls finish reason
+        
+        # 控制是否因tool_calls完成原因需要自动继续
         auto_continue = True
         auto_continue_count = 0
-
-        # Define inner function to handle a single run
+        
+        # 定义内部函数处理单次运行
         async def _run_once(temp_msg=None):
             try:
-                # Ensure config is available in this scope
+                # 确保config在此作用域可用
                 nonlocal config
-                # Note: config is now guaranteed to exist due to check above
-
-                # 1. Get messages from thread for LLM call
+                # 注意：由于上面的检查，config现在保证存在
+        
+                # 1. 从线程获取消息用于LLM调用
                 messages = await self.get_llm_messages(thread_id)
-
-                # 2. Check token count before proceeding
+        
+                # 2. 继续前检查token计数
                 token_count = 0
                 try:
-                    # Use the potentially modified working_system_prompt for token counting
+                    # 使用可能修改过的working_system_prompt进行token计数
                     token_count = token_counter(model=llm_model, messages=[working_system_prompt] + messages)
                     token_threshold = self.context_manager.token_threshold
                     logger.info(f"Thread {thread_id} token count: {token_count}/{token_threshold} ({(token_count/token_threshold)*100:.1f}%)")
-
+        
                 except Exception as e:
                     logger.error(f"Error counting tokens or summarizing: {str(e)}")
-
-                # 3. Prepare messages for LLM call + add temporary message if it exists
-                # Use the working_system_prompt which may contain the XML examples
+        
+                # 3. 准备LLM调用的消息 + 添加临时消息(如果存在)
+                # 使用可能包含XML示例的working_system_prompt
                 prepared_messages = [working_system_prompt]
-
-                # Find the last user message index
+        
+                # 查找最后一个用户消息的索引
                 last_user_index = -1
                 for i, msg in enumerate(messages):
                     if msg.get('role') == 'user':
                         last_user_index = i
-
-                # Insert temporary message before the last user message if it exists
+        
+                # 如果存在临时消息且找到用户消息，将其插入到最后一个用户消息前
                 if temp_msg and last_user_index >= 0:
                     prepared_messages.extend(messages[:last_user_index])
                     prepared_messages.append(temp_msg)
                     prepared_messages.extend(messages[last_user_index:])
                     logger.debug("Added temporary message before the last user message")
                 else:
-                    # If no user message or no temporary message, just add all messages
+                    # 如果没有用户消息或临时消息，直接添加所有消息
                     prepared_messages.extend(messages)
                     if temp_msg:
                         prepared_messages.append(temp_msg)
                         logger.debug("Added temporary message to the end of prepared messages")
-
-                # 4. Prepare tools for LLM call
+        
+                # 4. 准备LLM调用的工具
                 openapi_tool_schemas = None
                 if config.native_tool_calling:
                     openapi_tool_schemas = self.tool_registry.get_openapi_schemas()
                     logger.debug(f"Retrieved {len(openapi_tool_schemas) if openapi_tool_schemas else 0} OpenAPI tool schemas")
-
+        
                 prepared_messages = self.context_manager.compress_messages(prepared_messages, llm_model)
-
-                # 5. Make LLM API call
+        
+                # 5. 进行LLM API调用
                 logger.debug("Making LLM API call")
                 try:
                     if generation:
@@ -368,7 +367,7 @@ Here are the XML tools available with examples:
                             }
                         )
                     llm_response = await make_llm_api_call(
-                        prepared_messages, # Pass the potentially modified messages
+                        prepared_messages, # 传递可能修改过的消息
                         llm_model,
                         temperature=llm_temperature,
                         max_tokens=llm_max_tokens,
@@ -379,15 +378,15 @@ Here are the XML tools available with examples:
                         reasoning_effort=reasoning_effort
                     )
                     logger.debug("Successfully received raw LLM API response stream/object")
-
+        
                 except Exception as e:
                     logger.error(f"Failed to make LLM API call: {str(e)}", exc_info=True)
                     raise
-
-                # 6. Process LLM response using the ResponseProcessor
+        
+                # 6. 使用ResponseProcessor处理LLM响应
                 if stream:
                     logger.debug("Processing streaming response")
-                    # Ensure we have an async generator for streaming
+                    # 确保我们有异步生成器用于流式传输
                     if hasattr(llm_response, '__aiter__'):
                         response_generator = self.response_processor.process_streaming_response(
                             llm_response=cast(AsyncGenerator, llm_response),
@@ -397,7 +396,7 @@ Here are the XML tools available with examples:
                             llm_model=llm_model,
                         )
                     else:
-                        # Fallback to non-streaming if response is not iterable
+                        # 如果响应不可迭代，回退到非流式处理
                         response_generator = self.response_processor.process_non_streaming_response(
                             llm_response=llm_response,
                             thread_id=thread_id,
@@ -405,11 +404,11 @@ Here are the XML tools available with examples:
                             prompt_messages=prepared_messages,
                             llm_model=llm_model,
                         )
-
+        
                     return response_generator
                 else:
                     logger.debug("Processing non-streaming response")
-                    # Pass through the response generator without try/except to let errors propagate up
+                    # 直接传递响应生成器而不使用try/except，让错误向上传播
                     response_generator = self.response_processor.process_non_streaming_response(
                         llm_response=llm_response,
                         thread_id=thread_id,
@@ -417,92 +416,94 @@ Here are the XML tools available with examples:
                         prompt_messages=prepared_messages,
                         llm_model=llm_model,
                     )
-                    return response_generator # Return the generator
-
+                    return response_generator # 返回生成器
+        
             except Exception as e:
                 logger.error(f"Error in run_thread: {str(e)}", exc_info=True)
-                # Return the error as a dict to be handled by the caller
+                # 返回错误字典供调用者处理
                 return {
                     "type": "status",
                     "status": "error",
                     "message": str(e)
                 }
 
-        # Define a wrapper generator that handles auto-continue logic
+        # 定义自动继续包装器函数
         async def auto_continue_wrapper():
             nonlocal auto_continue, auto_continue_count
 
+            # 当需要自动继续且未达到最大次数时循环
             while auto_continue and (native_max_auto_continues == 0 or auto_continue_count < native_max_auto_continues):
-                # Reset auto_continue for this iteration
+                # 重置自动继续标志
                 auto_continue = False
 
-                # Run the thread once, passing the potentially modified system prompt
-                # Pass temp_msg only on the first iteration
+                # 运行线程一次，传递可能修改的系统提示
+                # 仅在第一次迭代时传递临时消息
                 try:
                     response_gen = await _run_once(temporary_message if auto_continue_count == 0 else None)
 
-                    # Handle error responses
+                    # 处理错误响应
                     if isinstance(response_gen, dict) and "status" in response_gen and response_gen["status"] == "error":
                         logger.error(f"Error in auto_continue_wrapper: {response_gen.get('message', 'Unknown error')}")
                         yield response_gen
-                        return  # Exit the generator on error
+                        return  # 错误时退出生成器
 
-                    # Process each chunk
+                    # 处理每个数据块
                     try:
                         if hasattr(response_gen, '__aiter__'):
                             async for chunk in cast(AsyncGenerator, response_gen):
-                                # Check if this is a finish reason chunk with tool_calls or xml_tool_limit_reached
+                                # 检查是否是带有tool_calls或xml_tool_limit_reached的完成原因块
                                 if chunk.get('type') == 'finish':
                                     if chunk.get('finish_reason') == 'tool_calls':
-                                        # Only auto-continue if enabled (max > 0)
+                                        # 仅在启用时自动继续(max > 0)
                                         if native_max_auto_continues > 0:
                                             logger.info(f"Detected finish_reason='tool_calls', auto-continuing ({auto_continue_count + 1}/{native_max_auto_continues})")
                                             auto_continue = True
                                             auto_continue_count += 1
-                                            # Don't yield the finish chunk to avoid confusing the client
+                                            # 不返回完成块以避免混淆客户端
                                             continue
                                     elif chunk.get('finish_reason') == 'xml_tool_limit_reached':
-                                        # Don't auto-continue if XML tool limit was reached
+                                        # 如果达到XML工具限制则不自动继续
                                         logger.info(f"Detected finish_reason='xml_tool_limit_reached', stopping auto-continue")
                                         auto_continue = False
-                                        # Still yield the chunk to inform the client
+                                        # 仍然返回块以通知客户端
 
-                                # Otherwise just yield the chunk normally
+                                # 否则正常返回块
                                 yield chunk
                         else:
-                            # response_gen is not iterable (likely an error dict), yield it directly
+                            # response_gen不可迭代(可能是错误字典)，直接返回
                             yield response_gen
 
-                        # If not auto-continuing, we're done
+                        # 如果不自动继续，则完成
                         if not auto_continue:
                             break
                     except Exception as e:
                         if ("AnthropicException - Overloaded" in str(e)):
+                            # 处理Anthropic过载异常，回退到OpenRouter
                             logger.error(f"AnthropicException - Overloaded detected - Falling back to OpenRouter: {str(e)}", exc_info=True)
                             nonlocal llm_model
                             llm_model = f"openrouter/{llm_model}"
                             auto_continue = True
-                            continue # Continue the loop
+                            continue # 继续循环
                         else:
-                            # If there's any other exception, log it, yield an error status, and stop execution
+                            # 其他异常，记录错误并返回错误状态
                             logger.error(f"Error in auto_continue_wrapper generator: {str(e)}", exc_info=True)
                             yield {
                                 "type": "status",
                                 "status": "error",
                                 "message": f"Error in thread processing: {str(e)}"
                             }
-                        return  # Exit the generator on any error
+                        return  # 任何错误时退出生成器
                 except Exception as outer_e:
-                    # Catch exceptions from _run_once itself
+                    # 捕获_run_once本身的异常
                     logger.error(f"Error executing thread: {str(outer_e)}", exc_info=True)
                     yield {
                         "type": "status",
                         "status": "error",
                         "message": f"Error executing thread: {str(outer_e)}"
                     }
-                    return  # Exit immediately on exception from _run_once
+                    return  # _run_once异常时立即退出
 
-            # If we've reached the max auto-continues, log a warning
+            # 如果达到最大自动继续次数，记录警告
             if auto_continue and auto_continue_count >= native_max_auto_continues:
                 logger.warning(f"Reached maximum auto-continue limit ({native_max_auto_continues}), stopping.")
                 yield {
@@ -510,11 +511,11 @@ Here are the XML tools available with examples:
                     "content": f"\n[Agent reached maximum auto-continue limit of {native_max_auto_continues}]"
                 }
 
-        # If auto-continue is disabled (max=0), just run once
+        #如果禁用自动继续（max=0），只需运行一次 
         if native_max_auto_continues == 0:
             logger.info("Auto-continue is disabled (native_max_auto_continues=0)")
-            # Pass the potentially modified system prompt and temp message
+            #传递可能修改的系统提示和临时消息 
             return await _run_once(temporary_message)
 
-        # Otherwise return the auto-continue wrapper generator
+        #否则返回自动继续包装生成器
         return auto_continue_wrapper()

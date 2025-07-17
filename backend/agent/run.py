@@ -523,15 +523,21 @@ async def run_agent(
                 if trace:
                     trace.event(name="error_parsing_browser_state", level="ERROR", status_message=(f"{e}"))
 
-        # Get the latest image_context message (NEW)
+        # 获取最新的image_context类型消息
         latest_image_context_msg = await client.table('messages').select('*').eq('thread_id', thread_id).eq('type', 'image_context').order('created_at', desc=True).limit(1).execute()
+        
+        # 如果存在image_context消息数据
         if latest_image_context_msg.data and len(latest_image_context_msg.data) > 0:
             try:
+                # 解析消息内容（可能是字典或JSON字符串）
                 image_context_content = latest_image_context_msg.data[0]["content"] if isinstance(latest_image_context_msg.data[0]["content"], dict) else json.loads(latest_image_context_msg.data[0]["content"])
+                
+                # 提取图像数据
                 base64_image = image_context_content.get("base64")
                 mime_type = image_context_content.get("mime_type")
                 file_path = image_context_content.get("file_path", "unknown file")
 
+                # 如果有有效的图像数据，添加到临时消息列表
                 if base64_image and mime_type:
                     temp_message_content_list.append({
                         "type": "text",
@@ -546,29 +552,36 @@ async def run_agent(
                 else:
                     logger.warning(f"Image context found for '{file_path}' but missing base64 or mime_type.")
 
+                # 删除已处理的image_context消息
                 await client.table('messages').delete().eq('message_id', latest_image_context_msg.data[0]["message_id"]).execute()
             except Exception as e:
                 logger.error(f"Error parsing image context: {e}")
                 if trace:
                     trace.event(name="error_parsing_image_context", level="ERROR", status_message=(f"{e}"))
 
-        # If we have any content, construct the temporary_message
+        # 如果有临时消息内容，构建临时消息
         if temp_message_content_list:
-            temporary_message = {"role": "user", "content": temp_message_content_list}
+            temporary_message = {
+                "role": "user",  # 消息角色设置为用户
+                "content": temp_message_content_list  # 包含文本/图像块的内容列表
+            }
             # logger.debug(f"Constructed temporary message with {len(temp_message_content_list)} content blocks.")
-        # ---- End Temporary Message Handling ----
+        # ---- 临时消息处理结束 ----
 
-        # Set max_tokens based on model
+        # 根据模型设置max_tokens
         max_tokens = None
+        
+        # Claude 3.5 Sonnet模型限制8192 tokens
         if "sonnet" in model_name.lower():
-            # Claude 3.5 Sonnet has a limit of 8192 tokens
             max_tokens = 8192
+        # GPT-4模型限制4096 tokens    
         elif "gpt-4" in model_name.lower():
             max_tokens = 4096
+        # Gemini 2.5 Pro模型限制64000 tokens
         elif "gemini-2.5-pro" in model_name.lower():
-            # Gemini 2.5 Pro has 64k max output tokens
             max_tokens = 64000
             
+        # 如果有跟踪功能，创建线程运行的生成记录
         generation = trace.generation(name="thread_manager.run_thread") if trace else None
         try:
             # Make the LLM call and process the response
