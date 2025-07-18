@@ -126,60 +126,72 @@ class ThreadManager:
             raise
 
     async def get_llm_messages(self, thread_id: str) -> List[Dict[str, Any]]:
-        """Get all messages for a thread.
+        """获取线程的所有消息。
 
-        This method uses the SQL function which handles context truncation
-        by considering summary messages.
+        该方法使用SQL函数处理上下文截断，
+        通过考虑摘要消息来实现。
 
-        Args:
-            thread_id: The ID of the thread to get messages for.
+        参数:
+            thread_id: 要获取消息的线程ID
 
-        Returns:
-            List of message objects.
+        返回:
+            消息对象列表
         """
         logger.debug(f"Getting messages for thread {thread_id}")
         client = await self.db.client
 
         try:
+            # 原始SQL函数调用方式(已注释)
             # result = await client.rpc('get_llm_formatted_messages', {'p_thread_id': thread_id}).execute()
             
-            # Fetch messages in batches of 1000 to avoid overloading the database
+            # 分批获取消息(每批1000条)以避免数据库过载
             all_messages = []
             batch_size = 1000
             offset = 0
             
             while True:
-                result = await client.table('messages').select('message_id, content').eq('thread_id', thread_id).eq('is_llm_message', True).order('created_at').range(offset, offset + batch_size - 1).execute()
+                # 从messages表查询指定thread_id的消息
+                result = await client.table('messages')
+                    .select('message_id, content')
+                    .eq('thread_id', thread_id)
+                    .eq('is_llm_message', True)
+                    .order('created_at')
+                    .range(offset, offset + batch_size - 1)
+                    .execute()
                 
+                # 如果没有数据或数据为空则终止循环
                 if not result.data or len(result.data) == 0:
                     break
                     
+                # 将当前批次数据添加到总列表
                 all_messages.extend(result.data)
                 
-                # If we got fewer than batch_size records, we've reached the end
+                # 如果获取的记录数小于批次大小，说明已到达末尾
                 if len(result.data) < batch_size:
                     break
                     
                 offset += batch_size
             
-            # Use all_messages instead of result.data in the rest of the method
+            # 使用all_messages代替result.data
             result_data = all_messages
 
-            # Parse the returned data which might be stringified JSON
+            # 解析返回的数据(可能是字符串化的JSON)
             if not result_data:
                 return []
 
-            # Return properly parsed JSON objects
+            # 返回正确解析的JSON对象
             messages = []
             for item in result_data:
                 if isinstance(item['content'], str):
                     try:
+                        # 尝试解析字符串内容为JSON
                         parsed_item = json.loads(item['content'])
                         parsed_item['message_id'] = item['message_id']
                         messages.append(parsed_item)
                     except json.JSONDecodeError:
                         logger.error(f"Failed to parse message: {item['content']}")
                 else:
+                    # 如果内容已经是字典格式，直接使用
                     content = item['content']
                     content['message_id'] = item['message_id']
                     messages.append(content)
