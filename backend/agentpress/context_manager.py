@@ -187,49 +187,57 @@ class ContextManager:
         return result
 
     def compress_messages(self, messages: List[Dict[str, Any]], llm_model: str, max_tokens: Optional[int] = 41000, token_threshold: int = 4096, max_iterations: int = 5) -> List[Dict[str, Any]]:
-        """Compress the messages.
+        """压缩消息列表以避免超出LLM模型的上下文窗口限制
         
         Args:
-            messages: List of messages to compress
-            llm_model: Model name for token counting
-            max_tokens: Maximum allowed tokens
-            token_threshold: Token threshold for individual message compression (must be a power of 2)
-            max_iterations: Maximum number of compression iterations
+            messages: 要压缩的消息列表
+            llm_model: 用于token计数的模型名称
+            max_tokens: 允许的最大token数
+            token_threshold: 单个消息压缩的token阈值(必须是2的幂)
+            max_iterations: 最大压缩迭代次数
         """
-        # Set model-specific token limits
+        # 根据不同的LLM模型设置特定的token限制
         if 'sonnet' in llm_model.lower():
-            max_tokens = 200 * 1000 - 64000 - 28000
+            max_tokens = 200 * 1000 - 64000 - 28000  # Claude 3.5 Sonnet模型限制
         elif 'gpt' in llm_model.lower():
-            max_tokens = 128 * 1000 - 28000
+            max_tokens = 128 * 1000 - 28000  # GPT-4模型限制
         elif 'gemini' in llm_model.lower():
-            max_tokens = 1000 * 1000 - 300000
+            max_tokens = 1000 * 1000 - 300000  # Gemini 2.5 Pro模型限制
         elif 'deepseek' in llm_model.lower():
-            max_tokens = 128 * 1000 - 28000
+            max_tokens = 128 * 1000 - 28000  # DeepSeek模型限制
         else:
-            max_tokens = 41 * 1000 - 10000
-
+            max_tokens = 41 * 1000 - 10000  # 默认模型限制
+    
         result = messages
+        # 第一步: 移除消息中的元数据
         result = self.remove_meta_messages(result)
-
+    
+        # 计算未压缩前的总token数
         uncompressed_total_token_count = token_counter(model=llm_model, messages=result)
-
-        result = self.compress_tool_result_messages(result, llm_model, max_tokens, token_threshold)
-        result = self.compress_user_messages(result, llm_model, max_tokens, token_threshold)
-        result = self.compress_assistant_messages(result, llm_model, max_tokens, token_threshold)
-
+    
+        # 第二步: 分别压缩不同类型的消息
+        result = self.compress_tool_result_messages(result, llm_model, max_tokens, token_threshold)  # 压缩工具结果消息
+        result = self.compress_user_messages(result, llm_model, max_tokens, token_threshold)  # 压缩用户消息
+        result = self.compress_assistant_messages(result, llm_model, max_tokens, token_threshold)  # 压缩助手消息
+    
+        # 计算压缩后的token数
         compressed_token_count = token_counter(model=llm_model, messages=result)
-
-        logger.info(f"compress_messages: {uncompressed_total_token_count} -> {compressed_token_count}")  # Log the token compression for debugging later
-
+    
+        # 记录压缩前后的token数对比
+        logger.info(f"compress_messages: {uncompressed_total_token_count} -> {compressed_token_count}")
+    
+        # 如果达到最大迭代次数但仍超过限制，则直接省略部分消息
         if max_iterations <= 0:
             logger.warning(f"compress_messages: Max iterations reached, omitting messages")
             result = self.compress_messages_by_omitting_messages(messages, llm_model, max_tokens)
             return result
-
+    
+        # 如果压缩后仍超过token限制，则进行更激进的压缩(阈值减半)
         if compressed_token_count > max_tokens:
             logger.warning(f"Further token compression is needed: {compressed_token_count} > {max_tokens}")
             result = self.compress_messages(messages, llm_model, max_tokens, token_threshold // 2, max_iterations - 1)
-
+    
+        # 最后采用"中间删除"策略保留关键消息
         return self.middle_out_messages(result)
     
     def compress_messages_by_omitting_messages(
