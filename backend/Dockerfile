@@ -1,4 +1,4 @@
-FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/astral-sh/uv:0.8.2
+FROM ghcr.io/astral-sh/uv:python3.11-alpine
 
 ENV ENV_MODE production
 WORKDIR /app
