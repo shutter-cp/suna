@@ -27,16 +27,36 @@ class ContextManager:
         self.token_threshold = token_threshold
 
     def is_tool_result_message(self, msg: Dict[str, Any]) -> bool:
-        """Check if a message is a tool result message."""
-        if not ("content" in msg and msg['content']):
+        """
+        检查给定的消息是否是工具执行结果消息。
+        
+        参数:
+            msg: 要检查的消息字典，包含消息内容和元数据
+            
+        返回:
+            bool: 如果是工具结果消息返回True，否则返回False
+            
+        处理逻辑:
+            1. 首先检查消息是否有内容
+            2. 检查字符串内容中是否包含'ToolResult'标记
+            3. 检查字典内容中是否包含'tool_execution'或'interactive_elements'字段
+            4. 尝试解析字符串内容为JSON，再次检查上述字段
+        """
+        if not ("content" in msg and msg['content']):  # 检查消息是否有内容
             return False
         content = msg['content']
+        
+        # 检查字符串内容中是否包含工具结果标记
         if isinstance(content, str) and "ToolResult" in content: 
             return True
+            
+        # 检查字典内容中是否包含工具执行或交互元素
         if isinstance(content, dict) and "tool_execution" in content: 
             return True
         if isinstance(content, dict) and "interactive_elements" in content: 
             return True
+            
+        # 尝试解析字符串内容为JSON格式
         if isinstance(content, str):
             try:
                 parsed_content = json.loads(content)
@@ -44,12 +64,22 @@ class ContextManager:
                     return True
                 if isinstance(parsed_content, dict) and "interactive_elements" in content: 
                     return True
-            except (json.JSONDecodeError, TypeError):
+            except (json.JSONDecodeError, TypeError):  # 捕获JSON解析错误
                 pass
-        return False
+                
+        return False  # 所有检查都不匹配时返回False
     
     def compress_message(self, msg_content: Union[str, dict], message_id: Optional[str] = None, max_length: int = 3000) -> Union[str, dict]:
-        """Compress the message content."""
+        """对消息内容进行简单截断压缩
+        该方法实现基础的消息压缩功能，对超过长度阈值的文本内容进行截断处理，
+        同时保留消息ID以便后续可能的消息展开操作。支持字符串和字典两种内容类型。
+        Args:
+            msg_content: 待压缩的消息内容，可以是字符串或字典
+            message_id: 消息唯一标识符，用于截断提示中
+            max_length: 最大允许长度阈值，默认3000字符
+        Returns:
+            压缩后的消息内容（保持原类型）
+        """
         if isinstance(msg_content, str):
             if len(msg_content) > max_length:
                 return msg_content[:max_length] + "... (truncated)" + f"\n\nmessage_id \"{message_id}\"\nUse expand-message tool to see contents"
@@ -62,7 +92,15 @@ class ContextManager:
                 return msg_content
         
     def safe_truncate(self, msg_content: Union[str, dict], max_length: int = 100000) -> Union[str, dict]:
-        """Truncate the message content safely by removing the middle portion."""
+        """安全截断消息内容，保留消息首尾部分
+        该方法实现智能的消息截断策略，通过保留消息开头和结尾部分来维持上下文完整性，
+        同时添加明确的截断标记和用户提示。支持字符串和字典两种内容类型。
+        Args:
+            msg_content: 待截断的消息内容，可以是字符串或字典
+            max_length: 最大允许长度阈值，默认100000字符（自动限制上限）
+        Returns:
+            截断后的消息内容（保持原类型）
+        """
         max_length = min(max_length, 100000)
         if isinstance(msg_content, str):
             if len(msg_content) > max_length:
@@ -93,70 +131,136 @@ class ContextManager:
                 return msg_content
   
     def compress_tool_result_messages(self, messages: List[Dict[str, Any]], llm_model: str, max_tokens: Optional[int], token_threshold: int = 1000) -> List[Dict[str, Any]]:
-        """Compress the tool result messages except the most recent one."""
+        """压缩工具结果消息，保留最新的工具结果，压缩历史工具结果
+        该方法通过选择性压缩历史工具结果消息来控制上下文窗口大小，同时确保最新的工具结果保持完整
+        Args:
+            messages: 待处理的消息列表
+            llm_model: 使用的LLM模型名称（用于令牌计数）
+            max_tokens: 允许的最大令牌数（None时使用默认值100,000）
+            token_threshold: 单条消息的令牌阈值，超过此值将被压缩
+        Returns:
+            压缩后的消息列表
+        """
+        # 计算未压缩消息的总令牌数
         uncompressed_total_token_count = token_counter(model=llm_model, messages=messages)
+        # 设置最大令牌值，未提供时使用100,000作为默认值
         max_tokens_value = max_tokens or (100 * 1000)
 
+        # 仅当未压缩令牌数超过最大令牌值时执行压缩
         if uncompressed_total_token_count > max_tokens_value:
-            _i = 0  # Count the number of ToolResult messages
-            for msg in reversed(messages):  # Start from the end and work backwards
-                if self.is_tool_result_message(msg):  # Only compress ToolResult messages
-                    _i += 1  # Count the number of ToolResult messages
-                    msg_token_count = token_counter(messages=[msg])  # Count the number of tokens in the message
-                    if msg_token_count > token_threshold:  # If the message is too long
-                        if _i > 1:  # If this is not the most recent ToolResult message
-                            message_id = msg.get('message_id')  # Get the message_id
+            _i = 0  # 工具结果消息计数器，用于识别最新的工具结果
+            # 从消息列表末尾开始反向迭代（最新消息优先处理）
+            for msg in reversed(messages):
+                # 仅处理工具结果类型的消息
+                if self.is_tool_result_message(msg):
+                    _i += 1  # 增加工具结果消息计数
+                    # 计算当前消息的令牌数
+                    msg_token_count = token_counter(messages=[msg])
+                    # 如果消息令牌数超过阈值，则需要压缩
+                    if msg_token_count > token_threshold:
+                        # _i > 1表示不是最新的工具结果消息（因为是反向迭代）
+                        if _i > 1:
+                            # 获取消息ID用于压缩标记
+                            message_id = msg.get('message_id')
                             if message_id:
+                                # 压缩非最新工具结果消息，使用3倍阈值作为压缩目标
                                 msg["content"] = self.compress_message(msg["content"], message_id, token_threshold * 3)
                             else:
+                                # 记录无消息ID的异常情况
                                 logger.warning(f"UNEXPECTED: Message has no message_id {str(msg)[:100]}")
                         else:
+                            # 最新的工具结果消息使用安全截断，保留更多内容（2倍最大令牌值）
                             msg["content"] = self.safe_truncate(msg["content"], int(max_tokens_value * 2))
+        # 返回处理后的消息列表
         return messages
 
     def compress_user_messages(self, messages: List[Dict[str, Any]], llm_model: str, max_tokens: Optional[int], token_threshold: int = 1000) -> List[Dict[str, Any]]:
-        """Compress the user messages except the most recent one."""
+        """压缩用户消息，保留最新的用户消息
+        该方法通过选择性压缩历史用户消息来控制上下文窗口大小，同时确保最新的用户消息保持完整
+        Args:
+            messages: 待处理的消息列表
+            llm_model: 使用的LLM模型名称（用于令牌计数）
+            max_tokens: 允许的最大令牌数（None时使用默认值100,000）
+            token_threshold: 单条消息的令牌阈值，超过此值将被压缩
+        Returns:
+            压缩后的消息列表
+        """
+        # 计算未压缩消息的总令牌数
         uncompressed_total_token_count = token_counter(model=llm_model, messages=messages)
+        # 设置最大令牌值，未提供时使用100,000作为默认值
         max_tokens_value = max_tokens or (100 * 1000)
 
+        # 仅当未压缩令牌数超过最大令牌值时执行压缩
         if uncompressed_total_token_count > max_tokens_value:
-            _i = 0  # Count the number of User messages
-            for msg in reversed(messages):  # Start from the end and work backwards
-                if msg.get('role') == 'user':  # Only compress User messages
-                    _i += 1  # Count the number of User messages
-                    msg_token_count = token_counter(messages=[msg])  # Count the number of tokens in the message
-                    if msg_token_count > token_threshold:  # If the message is too long
-                        if _i > 1:  # If this is not the most recent User message
-                            message_id = msg.get('message_id')  # Get the message_id
+            _i = 0  # 用户消息计数器，用于识别最新的用户消息
+            # 从消息列表末尾开始反向迭代（最新消息优先处理）
+            for msg in reversed(messages):
+                # 仅处理用户角色消息
+                if msg.get('role') == 'user':
+                    _i += 1  # 增加用户消息计数
+                    # 计算当前消息的令牌数
+                    msg_token_count = token_counter(messages=[msg])
+                    # 如果消息令牌数超过阈值，则需要压缩
+                    if msg_token_count > token_threshold:
+                        # _i > 1表示不是最新的用户消息（因为是反向迭代）
+                        if _i > 1:
+                            # 获取消息ID用于压缩标记
+                            message_id = msg.get('message_id')
                             if message_id:
+                                # 压缩非最新用户消息，使用3倍阈值作为压缩目标
                                 msg["content"] = self.compress_message(msg["content"], message_id, token_threshold * 3)
                             else:
+                                # 记录无消息ID的异常情况
                                 logger.warning(f"UNEXPECTED: Message has no message_id {str(msg)[:100]}")
                         else:
+                            # 最新的用户消息使用安全截断，保留更多内容（2倍最大令牌值）
                             msg["content"] = self.safe_truncate(msg["content"], int(max_tokens_value * 2))
+        # 返回处理后的消息列表
         return messages
 
     def compress_assistant_messages(self, messages: List[Dict[str, Any]], llm_model: str, max_tokens: Optional[int], token_threshold: int = 1000) -> List[Dict[str, Any]]:
-        """Compress the assistant messages except the most recent one."""
+        """压缩助手消息，保留最新的助手消息
+        该方法通过选择性压缩历史助手消息来控制上下文窗口大小，同时确保最新的助手消息保持完整
+        Args:
+            messages: 待处理的消息列表
+            llm_model: 使用的LLM模型名称（用于令牌计数）
+            max_tokens: 允许的最大令牌数（None时使用默认值100,000）
+            token_threshold: 单条消息的令牌阈值，超过此值将被压缩
+        Returns:
+            压缩后的消息列表
+        """
+        # 计算未压缩消息的总令牌数
         uncompressed_total_token_count = token_counter(model=llm_model, messages=messages)
+        # 设置最大令牌值，未提供时使用100,000作为默认值
         max_tokens_value = max_tokens or (100 * 1000)
         
+        # 仅当未压缩令牌数超过最大令牌值时执行压缩
         if uncompressed_total_token_count > max_tokens_value:
-            _i = 0  # Count the number of Assistant messages
-            for msg in reversed(messages):  # Start from the end and work backwards
-                if msg.get('role') == 'assistant':  # Only compress Assistant messages
-                    _i += 1  # Count the number of Assistant messages
-                    msg_token_count = token_counter(messages=[msg])  # Count the number of tokens in the message
-                    if msg_token_count > token_threshold:  # If the message is too long
-                        if _i > 1:  # If this is not the most recent Assistant message
-                            message_id = msg.get('message_id')  # Get the message_id
+            _i = 0  # 助手消息计数器，用于识别最新的助手消息
+            # 从消息列表末尾开始反向迭代（最新消息优先处理）
+            for msg in reversed(messages):
+                # 仅处理助手角色消息
+                if msg.get('role') == 'assistant':
+                    _i += 1  # 增加助手消息计数
+                    # 计算当前消息的令牌数
+                    msg_token_count = token_counter(messages=[msg])
+                    # 如果消息令牌数超过阈值，则需要压缩
+                    if msg_token_count > token_threshold:
+                        # _i > 1表示不是最新的助手消息（因为是反向迭代）
+                        if _i > 1:
+                            # 获取消息ID用于压缩标记
+                            message_id = msg.get('message_id')
                             if message_id:
+                                # 压缩非最新助手消息，使用3倍阈值作为压缩目标
                                 msg["content"] = self.compress_message(msg["content"], message_id, token_threshold * 3)
                             else:
+                                # 记录无消息ID的异常情况
                                 logger.warning(f"UNEXPECTED: Message has no message_id {str(msg)[:100]}")
                         else:
+                            # 最新的助手消息使用安全截断，保留更多内容（2倍最大令牌值）
                             msg["content"] = self.safe_truncate(msg["content"], int(max_tokens_value * 2))
                             
+        # 返回处理后的消息列表
         return messages
 
     def remove_meta_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -320,4 +424,4 @@ class ContextManager:
         keep_start = max_messages // 2
         keep_end = max_messages - keep_start
         
-        return messages[:keep_start] + messages[-keep_end:] 
+        return messages[:keep_start] + messages[-keep_end:]
