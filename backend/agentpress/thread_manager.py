@@ -79,24 +79,22 @@ class ThreadManager:
         agent_id: Optional[str] = None,
         agent_version_id: Optional[str] = None
     ):
-        """Add a message to the thread in the database.
-
-        Args:
-            thread_id: The ID of the thread to add the message to.
-            type: The type of the message (e.g., 'text', 'image_url', 'tool_call', 'tool', 'user', 'assistant').
-            content: The content of the message. Can be a dictionary, list, or string.
-                     It will be stored as JSONB in the database.
-            is_llm_message: Flag indicating if the message originated from the LLM.
-                            Defaults to False (user message).
-            metadata: Optional dictionary for additional message metadata.
-                      Defaults to None, stored as an empty JSONB object if None.
-            agent_id: Optional ID of the agent associated with this message.
-            agent_version_id: Optional ID of the specific agent version used.
+        """向线程的数据库中添加一条消息。
+        
+        参数说明:
+        thread_id: 要添加消息的线程ID
+        type: 消息类型 (例如: 'text', 'image_url', 'tool_call', 'tool', 'user', 'assistant')
+        content: 消息内容，可以是字典、列表或字符串，将作为JSONB存储在数据库中
+        is_llm_message: 标记消息是否来自LLM，默认为False(用户消息)
+        metadata: 可选的附加消息元数据，默认为None，如果为None则存储为空的JSONB对象
+            agent_id: 与此消息关联的代理ID(可选)
+            agent_version_id: 使用的特定代理版本ID(可选)
         """
         logger.debug(f"Adding message of type '{type}' to thread {thread_id} (agent: {agent_id}, version: {agent_version_id})")
+        # 获取数据库客户端
         client = await self.db.client
 
-        # Prepare data for insertion
+        # 准备要插入的数据
         data_to_insert = {
             'thread_id': thread_id,
             'type': type,
@@ -105,17 +103,18 @@ class ThreadManager:
             'metadata': metadata or {},
         }
         
-        # Add agent information if provided
+        # 如果提供了代理信息，则添加到数据中
         if agent_id:
             data_to_insert['agent_id'] = agent_id
         if agent_version_id:
             data_to_insert['agent_version_id'] = agent_version_id
 
         try:
-            # Insert the message and get the inserted row data including the id
+            # 插入消息并获取插入的行数据(包括ID)
             result = await client.table('messages').insert(data_to_insert).execute()
             logger.info(f"Successfully added message to thread {thread_id}")
 
+            # 检查结果并返回插入的数据
             if result.data and len(result.data) > 0 and isinstance(result.data[0], dict) and 'message_id' in result.data[0]:
                 return result.data[0]
             else:

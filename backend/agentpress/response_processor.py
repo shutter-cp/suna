@@ -147,34 +147,43 @@ class ResponseProcessor:
         llm_model: str,
         config: ProcessorConfig = ProcessorConfig(),
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Process a streaming LLM response, handling tool calls and execution.
-        
-        Args:
-            llm_response: Streaming response from the LLM
-            thread_id: ID of the conversation thread
-            prompt_messages: List of messages sent to the LLM (the prompt)
-            llm_model: The name of the LLM model used
-            config: Configuration for parsing and execution
-            
-        Yields:
-            Complete message objects matching the DB schema, except for content chunks.
         """
-        accumulated_content = ""
-        tool_calls_buffer = {}
-        current_xml_content = ""
-        xml_chunks_buffer = []
-        pending_tool_executions = []
-        yielded_tool_indices = set() # Stores indices of tools whose *status* has been yielded
-        tool_index = 0
-        xml_tool_call_count = 0
-        finish_reason = None
-        last_assistant_message_object = None # Store the final saved assistant message object
-        tool_result_message_objects = {} # tool_index -> full saved message object
-        has_printed_thinking_prefix = False # Flag for printing thinking prefix only once
-        agent_should_terminate = False # Flag to track if a terminating tool has been executed
-        complete_native_tool_calls = [] # Initialize early for use in assistant_response_end
+        处理流式LLM响应，处理工具调用和执行。
+        
+        参数:
+            llm_response: 来自LLM的流式响应
+            thread_id: 对话线程ID
+            prompt_messages: 发送给LLM的消息列表（提示）
+            llm_model: 使用的LLM模型名称
+            config: 解析和执行的配置
+            
+        返回:
+            AsyncGenerator: 符合数据库模式的完整消息对象，但内容为块状
+            
+        处理流程:
+            1. 初始化各种缓冲区和状态变量
+            2. 处理流式响应中的每个块
+            3. 识别和处理工具调用
+            4. 执行工具并生成结果
+            5. 生成响应流
+        """
+        # 初始化累积内容和各种缓冲区
+        accumulated_content = "" # 累积的文本内容
+        tool_calls_buffer = {} # 工具调用缓冲区
+        current_xml_content = "" # 当前XML内容
+        xml_chunks_buffer = [] # XML块缓冲区
+        pending_tool_executions = [] # 待执行的工具
+        yielded_tool_indices = set() # 已生成状态的工具索引
+        tool_index = 0 # 工具索引计数器
+        xml_tool_call_count = 0 # XML工具调用计数
+        finish_reason = None  # 完成原因
+        last_assistant_message_object = None # 最终保存的助手消息对象
+        tool_result_message_objects = {} # 工具索引到完整消息对象的映射
+        has_printed_thinking_prefix = False # 打印思考前缀的标志
+        agent_should_terminate = False # 代理是否应该终止的标志
+        complete_native_tool_calls = [] # 完整的原生工具调用列表
 
-        # Collect metadata for reconstructing LiteLLM response object
+        # 收集用于重建LiteLLM响应对象的元数据
         streaming_metadata = {
             "model": llm_model,
             "created": None,
@@ -194,59 +203,103 @@ class ResponseProcessor:
         thread_run_id = str(uuid.uuid4())
 
         try:
-            # --- Save and Yield Start Events ---
-            start_content = {"status_type": "thread_run_start", "thread_run_id": thread_run_id}
+            # --- 保存并生成开始事件 ---
+            # 创建线程运行开始状态消息
+            start_content = {
+                "status_type": "thread_run_start",  # 状态类型：线程运行开始
+                "thread_run_id": thread_run_id  # 线程运行ID
+            }
+            # 添加状态消息到数据库
             start_msg_obj = await self.add_message(
-                thread_id=thread_id, type="status", content=start_content, 
-                is_llm_message=False, metadata={"thread_run_id": thread_run_id}
+                thread_id=thread_id,  # 线程ID
+                type="status",  # 消息类型为状态
+                content=start_content,  # 消息内容
+                is_llm_message=False,  # 不是LLM消息
+                metadata={"thread_run_id": thread_run_id}  # 元数据包含线程运行ID
             )
-            if start_msg_obj: yield format_for_yield(start_msg_obj)
+            # 如果消息对象创建成功，则生成该消息
+            if start_msg_obj: 
+                yield format_for_yield(start_msg_obj)
 
-            assist_start_content = {"status_type": "assistant_response_start"}
+            # 创建助手响应开始状态消息
+            assist_start_content = {
+                "status_type": "assistant_response_start"  # 状态类型：助手响应开始
+            }
+            # 添加状态消息到数据库
             assist_start_msg_obj = await self.add_message(
-                thread_id=thread_id, type="status", content=assist_start_content, 
-                is_llm_message=False, metadata={"thread_run_id": thread_run_id}
+                thread_id=thread_id,  # 线程ID
+                type="status",  # 消息类型为状态
+                content=assist_start_content,  # 消息内容
+                is_llm_message=False,  # 不是LLM消息
+                metadata={"thread_run_id": thread_run_id}  # 元数据包含线程运行ID
             )
-            if assist_start_msg_obj: yield format_for_yield(assist_start_msg_obj)
-            # --- End Start Events ---
+            # 如果消息对象创建成功，则生成该消息
+            if assist_start_msg_obj: 
+                yield format_for_yield(assist_start_msg_obj)
+            # --- 结束开始事件 ---
 
             __sequence = 0
 
+            # 异步遍历LLM响应流中的每个数据块
             async for chunk in llm_response:
-                # Extract streaming metadata from chunks
+                # 从数据块中提取流式元数据
+                # 记录当前时间戳用于计算延迟
                 current_time = datetime.now(timezone.utc).timestamp()
                 if streaming_metadata["first_chunk_time"] is None:
                     streaming_metadata["first_chunk_time"] = current_time
                 streaming_metadata["last_chunk_time"] = current_time
                 
-                # Extract metadata from chunk attributes
+                # 从响应数据块中提取核心元数据信息
+                # 这些数据用于构建完整的响应记录和监控分析
+                
+                # 提取响应创建时间戳（Unix时间戳格式）
                 if hasattr(chunk, 'created') and chunk.created:
                     streaming_metadata["created"] = chunk.created
+                    
+                # 提取使用的AI模型名称（如gpt-4, claude-3等）
                 if hasattr(chunk, 'model') and chunk.model:
                     streaming_metadata["model"] = chunk.model
+                    
+                # 提取token使用量统计（如果提供商返回了使用数据）
                 if hasattr(chunk, 'usage') and chunk.usage:
-                    # Update usage information if available (including zero values)
+                    # 更新token使用信息（包括零值情况）
+                    # prompt_tokens: 输入提示消耗的token数量
                     if hasattr(chunk.usage, 'prompt_tokens') and chunk.usage.prompt_tokens is not None:
                         streaming_metadata["usage"]["prompt_tokens"] = chunk.usage.prompt_tokens
+                    # completion_tokens: 生成回复消耗的token数量  
                     if hasattr(chunk.usage, 'completion_tokens') and chunk.usage.completion_tokens is not None:
                         streaming_metadata["usage"]["completion_tokens"] = chunk.usage.completion_tokens
+                    # total_tokens: 总共消耗的token数量（输入+输出）
                     if hasattr(chunk.usage, 'total_tokens') and chunk.usage.total_tokens is not None:
                         streaming_metadata["usage"]["total_tokens"] = chunk.usage.total_tokens
 
+                # 检测AI响应的结束状态
+                # 这一连串条件检查确保我们能够安全地获取响应结束的原因
                 if hasattr(chunk, 'choices') and chunk.choices and hasattr(chunk.choices[0], 'finish_reason') and chunk.choices[0].finish_reason:
+                    # 提取响应结束的原因，用于判断对话是否正常完成
+                    # 可能的值：'stop'（正常结束）、'length'（达到长度限制）、'content_filter'（内容被过滤）等
                     finish_reason = chunk.choices[0].finish_reason
                     logger.debug(f"Detected finish_reason: {finish_reason}")
 
                 if hasattr(chunk, 'choices') and chunk.choices:
+                    # 安全提取响应数据块中的增量内容
+                    # delta 包含本次数据块中的内容变化，可能是文本内容或工具调用信息
+                    # 使用 hasattr 进行防御式编程，避免属性不存在导致的异常
                     delta = chunk.choices[0].delta if hasattr(chunk.choices[0], 'delta') else None
                     
-                    # Check for and log Anthropic thinking content
+                    # 检查并处理 Anthropic 模型的思考过程内容
+                    # Anthropic 的 Claude 模型会在 reasoning_content 中返回模型的思考链
+                    # 这部分内容对用户透明，但会被记录到完整响应中用于调试和分析
                     if delta and hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                        # 首次发现思考内容时打印标识（已注释掉）··
                         if not has_printed_thinking_prefix:
                             # print("[THINKING]: ", end='', flush=True)
                             has_printed_thinking_prefix = True
+                        
+                        # 实际打印思考内容（已注释掉）
                         # print(delta.reasoning_content, end='', flush=True)
-                        # Append reasoning to main content to be saved in the final message
+                        
+                        # 将思考内容追加到累积内容中，确保完整保存响应
                         accumulated_content += delta.reasoning_content
 
                     # Process content chunk
@@ -256,8 +309,11 @@ class ResponseProcessor:
                         accumulated_content += chunk_content
                         current_xml_content += chunk_content
 
+                        # 检查是否未达到XML工具调用数量限制
+                        # 条件：当max_xml_tool_calls <= 0（无限制）或当前计数小于限制时，才允许传输内容块
                         if not (config.max_xml_tool_calls > 0 and xml_tool_call_count >= config.max_xml_tool_calls):
-                            # Yield ONLY content chunk (don't save)
+                            # 仅传输内容块（不保存到数据库）
+                            # 用于实时向客户端推送助手的回复内容片段
                             now_chunk = datetime.now(timezone.utc).isoformat()
                             yield {
                                 "sequence": __sequence,

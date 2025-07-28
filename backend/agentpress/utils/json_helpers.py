@@ -146,29 +146,55 @@ def to_json_string(value: Any) -> str:
 
 def format_for_yield(message_object: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Format a message object for yielding, ensuring content and metadata are JSON strings.
+    格式化消息对象以供生成器yield使用，确保内容和元数据是JSON字符串格式。
     
-    This maintains backward compatibility with clients expecting JSON strings
-    while the database now stores proper objects.
+    此函数用于维护与客户端的向后兼容性，客户端期望接收JSON字符串格式的内容和元数据，
+    而数据库现在存储的是适当的对象格式。
+    
+    在异步流式响应处理中，这个函数特别重要，因为它将数据库中的对象转换为适合通过
+    Server-Sent Events (SSE) 发送到前端的格式。
     
     Args:
-        message_object: The message object from the database
+        message_object: 来自数据库的消息对象，可能包含以下字段：
+            - content: 消息内容，可能是字符串或字典/列表格式
+            - metadata: 消息元数据，可能是字符串或字典/列表格式
+            - type: 消息类型（如 'status', 'tool_call', 'assistant_response' 等）
+            - thread_id: 关联的线程ID
+            - 其他标准消息字段
         
     Returns:
-        Message object with content and metadata as JSON strings
+        Dict[str, Any]: 格式化后的消息对象，其中：
+            - content 字段保证为JSON字符串格式
+            - metadata 字段保证为JSON字符串格式
+            - 其他字段保持不变
+            
+    Example:
+        输入: {
+            'type': 'assistant_response',
+            'content': {'text': 'Hello world'},
+            'metadata': {'tokens': 10}
+        }
+        
+        输出: {
+            'type': 'assistant_response',
+            'content': '{"text": "Hello world"}',
+            'metadata': '{"tokens": 10}'
+        }
     """
     if not message_object:
         return message_object
         
-    # Create a copy to avoid modifying the original
+    # 创建副本以避免修改原始对象
     formatted = message_object.copy()
     
-    # Ensure content is a JSON string
+    # 确保内容是JSON字符串格式
+    # 如果内容不是字符串（即数据库中的新格式对象），则将其转换为JSON字符串
     if 'content' in formatted and not isinstance(formatted['content'], str):
         formatted['content'] = json.dumps(formatted['content'])
         
-    # Ensure metadata is a JSON string
+    # 确保元数据是JSON字符串格式
+    # 如果元数据不是字符串（即数据库中的新格式对象），则将其转换为JSON字符串
     if 'metadata' in formatted and not isinstance(formatted['metadata'], str):
         formatted['metadata'] = json.dumps(formatted['metadata'])
         
-    return formatted 
+    return formatted
