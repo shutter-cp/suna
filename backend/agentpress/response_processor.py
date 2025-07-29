@@ -328,102 +328,150 @@ class ResponseProcessor:
                             logger.info("XML tool call limit reached - not yielding more content chunks")
                             self.trace.event(name="xml_tool_call_limit_reached", level="DEFAULT", status_message=(f"XML tool call limit reached - not yielding more content chunks"))
 
-                        # --- Process XML Tool Calls (if enabled and limit not reached) ---
+                        # --- 处理XML工具调用（如果启用且未达到数量限制）---
+                        # 双重条件检查：确保XML工具调用功能已启用，且未达到最大调用次数限制
                         if config.xml_tool_calling and not (config.max_xml_tool_calls > 0 and xml_tool_call_count >= config.max_xml_tool_calls):
+                            # 从当前累积的XML内容中提取所有完整的XML块
                             xml_chunks = self._extract_xml_chunks(current_xml_content)
                             for xml_chunk in xml_chunks:
+                                # 从当前内容中移除已处理的XML块，避免重复处理
                                 current_xml_content = current_xml_content.replace(xml_chunk, "", 1)
+                                # 将处理过的XML块存入缓冲区，用于调试和日志记录
                                 xml_chunks_buffer.append(xml_chunk)
+                                
+                                # 解析XML块为工具调用对象，返回工具调用信息和解析详情
                                 result = self._parse_xml_tool_call(xml_chunk)
                                 if result:
                                     tool_call, parsing_details = result
-                                    xml_tool_call_count += 1
+                                    xml_tool_call_count += 1  # 递增XML工具调用计数器
+                                    
+                                    # 获取当前助手消息的ID，用于关联工具调用上下文
                                     current_assistant_id = last_assistant_message_object['message_id'] if last_assistant_message_object else None
+                                    # 创建工具调用上下文，包含执行所需的所有信息
                                     context = self._create_tool_context(
                                         tool_call, tool_index, current_assistant_id, parsing_details
                                     )
 
+                                    # 如果启用了工具执行且允许流式执行，则启动异步任务
                                     if config.execute_tools and config.execute_on_stream:
-                                        # Save and Yield tool_started status
+                                        # 保存并传输工具开始执行的状态消息
                                         started_msg_obj = await self._yield_and_save_tool_started(context, thread_id, thread_run_id)
                                         if started_msg_obj: yield format_for_yield(started_msg_obj)
-                                        yielded_tool_indices.add(tool_index) # Mark status as yielded
+                                        yielded_tool_indices.add(tool_index)  # 标记该工具状态已传输
 
+                                        # 创建异步任务执行工具调用，实现并发处理
                                         execution_task = asyncio.create_task(self._execute_tool(tool_call))
                                         pending_tool_executions.append({
                                             "task": execution_task, "tool_call": tool_call,
                                             "tool_index": tool_index, "context": context
                                         })
-                                        tool_index += 1
+                                        tool_index += 1  # 为下一个工具调用准备索引
 
+                                    # 检查是否达到XML工具调用限制，如果是则停止处理更多块
                                     if config.max_xml_tool_calls > 0 and xml_tool_call_count >= config.max_xml_tool_calls:
-                                        logger.debug(f"Reached XML tool call limit ({config.max_xml_tool_calls})")
-                                        finish_reason = "xml_tool_limit_reached"
-                                        break # Stop processing more XML chunks in this delta
+                                        logger.debug(f"已达到XML工具调用限制 ({config.max_xml_tool_calls})")
+                                        finish_reason = "xml_tool_limit_reached"  # 设置特殊的完成原因
+                                        break  # 停止处理当前delta中的更多XML块
 
-                    # --- Process Native Tool Call Chunks ---
+                    # --- 处理原生工具调用块 ---
+                    # 检查是否启用原生工具调用，并且当前块包含工具调用信息
                     if config.native_tool_calling and delta and hasattr(delta, 'tool_calls') and delta.tool_calls:
+                        # 遍历所有工具调用块
                         for tool_call_chunk in delta.tool_calls:
-                            # Yield Native Tool Call Chunk (transient status, not saved)
-                            # ... (safe extraction logic for tool_call_data_chunk) ...
-                            tool_call_data_chunk = {} # Placeholder for extracted data
-                            if hasattr(tool_call_chunk, 'model_dump'): tool_call_data_chunk = tool_call_chunk.model_dump()
-                            else: # Manual extraction...
-                                if hasattr(tool_call_chunk, 'id'): tool_call_data_chunk['id'] = tool_call_chunk.id
-                                if hasattr(tool_call_chunk, 'index'): tool_call_data_chunk['index'] = tool_call_chunk.index
-                                if hasattr(tool_call_chunk, 'type'): tool_call_data_chunk['type'] = tool_call_chunk.type
+                            # 生成原生工具调用块状态（临时状态，不保存）
+                            # ... (安全提取 tool_call_data_chunk 的逻辑) ...
+                            tool_call_data_chunk = {} # 提取数据的占位符
+                            # 尝试使用 model_dump 方法提取数据，否则手动提取
+                            if hasattr(tool_call_chunk, 'model_dump'): 
+                                tool_call_data_chunk = tool_call_chunk.model_dump()
+                            else: 
+                                # 手动提取工具调用块的各个属性
+                                if hasattr(tool_call_chunk, 'id'): 
+                                    tool_call_data_chunk['id'] = tool_call_chunk.id
+                                if hasattr(tool_call_chunk, 'index'): 
+                                    tool_call_data_chunk['index'] = tool_call_chunk.index
+                                if hasattr(tool_call_chunk, 'type'): 
+                                    tool_call_data_chunk['type'] = tool_call_chunk.type
                                 if hasattr(tool_call_chunk, 'function'):
                                     tool_call_data_chunk['function'] = {}
-                                    if hasattr(tool_call_chunk.function, 'name'): tool_call_data_chunk['function']['name'] = tool_call_chunk.function.name
-                                    if hasattr(tool_call_chunk.function, 'arguments'): tool_call_data_chunk['function']['arguments'] = tool_call_chunk.function.arguments if isinstance(tool_call_chunk.function.arguments, str) else to_json_string(tool_call_chunk.function.arguments)
+                                    if hasattr(tool_call_chunk.function, 'name'): 
+                                        tool_call_data_chunk['function']['name'] = tool_call_chunk.function.name
+                                    if hasattr(tool_call_chunk.function, 'arguments'): 
+                                        # 如果参数是字符串则直接使用，否则转换为 JSON 字符串
+                                        tool_call_data_chunk['function']['arguments'] = tool_call_chunk.function.arguments if isinstance(tool_call_chunk.function.arguments, str) else to_json_string(tool_call_chunk.function.arguments)
 
-
+                            # 记录当前时间并生成工具调用块状态
                             now_tool_chunk = datetime.now(timezone.utc).isoformat()
                             yield {
-                                "message_id": None, "thread_id": thread_id, "type": "status", "is_llm_message": True,
-                                "content": to_json_string({"role": "assistant", "status_type": "tool_call_chunk", "tool_call_chunk": tool_call_data_chunk}),
+                                "message_id": None, 
+                                "thread_id": thread_id, 
+                                "type": "status", 
+                                "is_llm_message": True,
+                                "content": to_json_string({
+                                    "role": "assistant", 
+                                    "status_type": "tool_call_chunk", 
+                                    "tool_call_chunk": tool_call_data_chunk
+                                }),
                                 "metadata": to_json_string({"thread_run_id": thread_run_id}),
-                                "created_at": now_tool_chunk, "updated_at": now_tool_chunk
+                                "created_at": now_tool_chunk, 
+                                "updated_at": now_tool_chunk
                             }
 
-                            # --- Buffer and Execute Complete Native Tool Calls ---
-                            if not hasattr(tool_call_chunk, 'function'): continue
+                            # --- 缓冲并执行完整的原生工具调用 ---
+                            # 如果工具调用块没有函数属性，则跳过
+                            if not hasattr(tool_call_chunk, 'function'): 
+                                continue
+                            # 获取工具调用块的索引，如果没有则默认为 0
                             idx = tool_call_chunk.index if hasattr(tool_call_chunk, 'index') else 0
-                            # ... (buffer update logic remains same) ...
-                            # ... (check complete logic remains same) ...
-                            has_complete_tool_call = False # Placeholder
+                            # ... (缓冲区更新逻辑保持不变) ...
+                            # ... (检查完整性的逻辑保持不变) ...
+                            has_complete_tool_call = False # 完整工具调用的占位符
+                            # 检查缓冲区中是否有完整的工具调用（包含 ID、函数名和参数）
                             if (tool_calls_buffer.get(idx) and
                                 tool_calls_buffer[idx]['id'] and
                                 tool_calls_buffer[idx]['function']['name'] and
                                 tool_calls_buffer[idx]['function']['arguments']):
                                 try:
+                                    # 尝试解析参数为 JSON，如果成功则标记为完整工具调用
                                     safe_json_parse(tool_calls_buffer[idx]['function']['arguments'])
                                     has_complete_tool_call = True
-                                except json.JSONDecodeError: pass
+                                except json.JSONDecodeError: 
+                                    # 如果解析失败则忽略
+                                    pass
 
-
+                            # 如果有完整工具调用，并且配置允许执行工具，并且在流式传输时执行
                             if has_complete_tool_call and config.execute_tools and config.execute_on_stream:
+                                # 获取当前工具调用数据
                                 current_tool = tool_calls_buffer[idx]
                                 tool_call_data = {
                                     "function_name": current_tool['function']['name'],
                                     "arguments": safe_json_parse(current_tool['function']['arguments']),
                                     "id": current_tool['id']
                                 }
+                                # 获取当前助手消息 ID
                                 current_assistant_id = last_assistant_message_object['message_id'] if last_assistant_message_object else None
+                                # 创建工具上下文
                                 context = self._create_tool_context(
                                     tool_call_data, tool_index, current_assistant_id
                                 )
 
-                                # Save and Yield tool_started status
+                                # 保存并生成工具开始状态
                                 started_msg_obj = await self._yield_and_save_tool_started(context, thread_id, thread_run_id)
-                                if started_msg_obj: yield format_for_yield(started_msg_obj)
-                                yielded_tool_indices.add(tool_index) # Mark status as yielded
+                                if started_msg_obj: 
+                                    yield format_for_yield(started_msg_obj)
+                                # 标记状态已生成
+                                yielded_tool_indices.add(tool_index)
 
+                                # 创建异步任务执行工具
                                 execution_task = asyncio.create_task(self._execute_tool(tool_call_data))
+                                # 将任务添加到待处理执行列表中
                                 pending_tool_executions.append({
-                                    "task": execution_task, "tool_call": tool_call_data,
-                                    "tool_index": tool_index, "context": context
+                                    "task": execution_task, 
+                                    "tool_call": tool_call_data,
+                                    "tool_index": tool_index, 
+                                    "context": context
                                 })
+                                # 增加工具索引
                                 tool_index += 1
 
                 if finish_reason == "xml_tool_limit_reached":
@@ -435,109 +483,138 @@ class ResponseProcessor:
 
             # --- After Streaming Loop ---
             
+            # --- 流处理循环结束后的处理 ---
+            
+            # 检查是否从LLM提供商获得了token使用数据
+            # 如果没有获得，则使用litellm.token_counter来估算token使用量
             if (
                 streaming_metadata["usage"]["total_tokens"] == 0
             ):
                 logger.info("🔥 No usage data from provider, counting with litellm.token_counter")
                 
                 try:
-                    # prompt side
+                    # 计算提示部分的token数量
                     prompt_tokens = token_counter(
                         model=llm_model,
                         messages=prompt_messages               # chat or plain; token_counter handles both
                     )
 
-                    # completion side
+                    # 计算完成部分的token数量
                     completion_tokens = token_counter(
                         model=llm_model,
                         text=accumulated_content or ""         # empty string safe
                     )
 
+                    # 更新流元数据中的token使用信息
                     streaming_metadata["usage"]["prompt_tokens"]      = prompt_tokens
                     streaming_metadata["usage"]["completion_tokens"]  = completion_tokens
                     streaming_metadata["usage"]["total_tokens"]       = prompt_tokens + completion_tokens
 
+                    # 记录估算的token使用量
                     logger.info(
                         f"🔥 Estimated tokens – prompt: {prompt_tokens}, "
                         f"completion: {completion_tokens}, total: {prompt_tokens + completion_tokens}"
                     )
                     self.trace.event(name="usage_calculated_with_litellm_token_counter", level="DEFAULT", status_message=(f"Usage calculated with litellm.token_counter"))
                 except Exception as e:
+                    # 如果计算token使用量失败，记录警告信息
                     logger.warning(f"Failed to calculate usage: {str(e)}")
                     self.trace.event(name="failed_to_calculate_usage", level="WARNING", status_message=(f"Failed to calculate usage: {str(e)}"))
 
 
-            # Wait for pending tool executions from streaming phase
-            tool_results_buffer = [] # Stores (tool_call, result, tool_index, context)
+            # 等待流式阶段中待处理的工具执行完成
+            # 创建一个缓冲区来存储工具执行结果，每个元素包含(工具调用, 执行结果, 工具索引, 上下文)
+            tool_results_buffer = []
+            
+            # 如果存在待处理的工具执行任务
             if pending_tool_executions:
-                logger.info(f"Waiting for {len(pending_tool_executions)} pending streamed tool executions")
-                self.trace.event(name="waiting_for_pending_streamed_tool_executions", level="DEFAULT", status_message=(f"Waiting for {len(pending_tool_executions)} pending streamed tool executions"))
-                # ... (asyncio.wait logic) ...
+                logger.info(f"等待 {len(pending_tool_executions)} 个流式工具执行完成")
+                self.trace.event(name="waiting_for_pending_streamed_tool_executions", level="DEFAULT", 
+                               status_message=(f"等待 {len(pending_tool_executions)} 个流式工具执行完成"))
+                
+                # 提取所有待执行的异步任务
                 pending_tasks = [execution["task"] for execution in pending_tool_executions]
+                # 等待所有任务完成，done包含已完成的任务，_包含未完成的任务（理论上应该都已完成）
                 done, _ = await asyncio.wait(pending_tasks)
 
+                # 遍历所有待处理的工具执行
                 for execution in pending_tool_executions:
-                    tool_idx = execution.get("tool_index", -1)
-                    context = execution["context"]
-                    tool_name = context.function_name
+                    tool_idx = execution.get("tool_index", -1)  # 获取工具索引，默认为-1
+                    context = execution["context"]  # 获取工具执行的上下文信息
+                    tool_name = context.function_name  # 获取工具名称
                     
-                    # Check if status was already yielded during stream run
+                    # 检查该工具的状态是否已在流式阶段返回
                     if tool_idx in yielded_tool_indices:
-                         logger.debug(f"Status for tool index {tool_idx} already yielded.")
-                         # Still need to process the result for the buffer
-                         try:
-                             if execution["task"].done():
-                                 result = execution["task"].result()
-                                 context.result = result
-                                 tool_results_buffer.append((execution["tool_call"], result, tool_idx, context))
-                                 
-                                 if tool_name in ['ask', 'complete']:
-                                     logger.info(f"Terminating tool '{tool_name}' completed during streaming. Setting termination flag.")
-                                     self.trace.event(name="terminating_tool_completed_during_streaming", level="DEFAULT", status_message=(f"Terminating tool '{tool_name}' completed during streaming. Setting termination flag."))
-                                     agent_should_terminate = True
+                        logger.debug(f"工具索引 {tool_idx} 的状态已在流式阶段返回")
+                        
+                        # 即使状态已返回，仍需处理结果以填充缓冲区
+                        try:
+                            # 检查任务是否确实已完成
+                            if execution["task"].done():
+                                # 获取工具执行结果
+                                result = execution["task"].result()
+                                context.result = result  # 将结果保存到上下文中
+                                # 将结果添加到缓冲区
+                                tool_results_buffer.append((execution["tool_call"], result, tool_idx, context))
+                                
+                                # 检查是否为终止工具（ask或complete），如果是则设置终止标志
+                                if tool_name in ['ask', 'complete']:
+                                    logger.info(f"终止工具 '{tool_name}' 在流式阶段完成，设置终止标志")
+                                    self.trace.event(name="terminating_tool_completed_during_streaming", level="DEFAULT", 
+                                                   status_message=(f"终止工具 '{tool_name}' 在流式阶段完成，设置终止标志"))
+                                    agent_should_terminate = True
                                      
-                             else: # Should not happen with asyncio.wait
-                                logger.warning(f"Task for tool index {tool_idx} not done after wait.")
-                                self.trace.event(name="task_for_tool_index_not_done_after_wait", level="WARNING", status_message=(f"Task for tool index {tool_idx} not done after wait."))
-                         except Exception as e:
-                             logger.error(f"Error getting result for pending tool execution {tool_idx}: {str(e)}")
-                             self.trace.event(name="error_getting_result_for_pending_tool_execution", level="ERROR", status_message=(f"Error getting result for pending tool execution {tool_idx}: {str(e)}"))
-                             context.error = e
-                             # Save and Yield tool error status message (even if started was yielded)
-                             error_msg_obj = await self._yield_and_save_tool_error(context, thread_id, thread_run_id)
-                             if error_msg_obj: yield format_for_yield(error_msg_obj)
-                         continue # Skip further status yielding for this tool index
+                            else:  # 理论上不应该发生，因为asyncio.wait应该等待所有任务完成
+                                logger.warning(f"工具索引 {tool_idx} 的任务在等待后仍未完成")
+                                self.trace.event(name="task_for_tool_index_not_done_after_wait", level="WARNING", 
+                                               status_message=(f"工具索引 {tool_idx} 的任务在等待后仍未完成"))
+                        
+                        except Exception as e:
+                            # 处理工具执行异常
+                            logger.error(f"获取待处理工具执行 {tool_idx} 的结果时出错: {str(e)}")
+                            self.trace.event(name="error_getting_result_for_pending_tool_execution", level="ERROR", 
+                                           status_message=(f"获取待处理工具执行 {tool_idx} 的结果时出错: {str(e)}"))
+                            context.error = e
+                            # 保存并返回工具错误状态消息（即使已开始状态已返回）
+                            error_msg_obj = await self._yield_and_save_tool_error(context, thread_id, thread_run_id)
+                            if error_msg_obj: yield format_for_yield(error_msg_obj)
+                        
+                        continue  # 跳过该工具索引的进一步状态返回
 
-                    # If status wasn't yielded before (shouldn't happen with current logic), yield it now
+                    # 如果状态之前未返回（理论上不应该发生），现在返回
                     try:
                         if execution["task"].done():
+                            # 获取工具执行结果
                             result = execution["task"].result()
                             context.result = result
                             tool_results_buffer.append((execution["tool_call"], result, tool_idx, context))
                             
-                            # Check if this is a terminating tool
+                            # 检查是否为终止工具
                             if tool_name in ['ask', 'complete']:
-                                logger.info(f"Terminating tool '{tool_name}' completed during streaming. Setting termination flag.")
-                                self.trace.event(name="terminating_tool_completed_during_streaming", level="DEFAULT", status_message=(f"Terminating tool '{tool_name}' completed during streaming. Setting termination flag."))
+                                logger.info(f"终止工具 '{tool_name}' 在流式阶段完成，设置终止标志")
+                                self.trace.event(name="terminating_tool_completed_during_streaming", level="DEFAULT", 
+                                               status_message=(f"终止工具 '{tool_name}' 在流式阶段完成，设置终止标志"))
                                 agent_should_terminate = True
                                 
-                            # Save and Yield tool completed/failed status
+                            # 保存并返回工具完成/失败状态
                             completed_msg_obj = await self._yield_and_save_tool_completed(
                                 context, None, thread_id, thread_run_id
                             )
                             if completed_msg_obj: yield format_for_yield(completed_msg_obj)
                             yielded_tool_indices.add(tool_idx)
                     except Exception as e:
-                        logger.error(f"Error getting result/yielding status for pending tool execution {tool_idx}: {str(e)}")
-                        self.trace.event(name="error_getting_result_yielding_status_for_pending_tool_execution", level="ERROR", status_message=(f"Error getting result/yielding status for pending tool execution {tool_idx}: {str(e)}"))
+                        # 处理工具执行异常
+                        logger.error(f"获取待处理工具执行 {tool_idx} 的结果/返回状态时出错: {str(e)}")
+                        self.trace.event(name="error_getting_result_yielding_status_for_pending_tool_execution", level="ERROR", 
+                                       status_message=(f"获取待处理工具执行 {tool_idx} 的结果/返回状态时出错: {str(e)}"))
                         context.error = e
-                        # Save and Yield tool error status
+                        # 保存并返回工具错误状态
                         error_msg_obj = await self._yield_and_save_tool_error(context, thread_id, thread_run_id)
                         if error_msg_obj: yield format_for_yield(error_msg_obj)
                         yielded_tool_indices.add(tool_idx)
 
 
-            # Save and yield finish status if limit was reached
+            # 如果达到限制，则保存并产生完成状态
             if finish_reason == "xml_tool_limit_reached":
                 finish_content = {"status_type": "finish", "finish_reason": "xml_tool_limit_reached"}
                 finish_msg_obj = await self.add_message(
@@ -548,51 +625,61 @@ class ResponseProcessor:
                 logger.info(f"Stream finished with reason: xml_tool_limit_reached after {xml_tool_call_count} XML tool calls")
                 self.trace.event(name="stream_finished_with_reason_xml_tool_limit_reached_after_xml_tool_calls", level="DEFAULT", status_message=(f"Stream finished with reason: xml_tool_limit_reached after {xml_tool_call_count} XML tool calls"))
 
-            # --- SAVE and YIELD Final Assistant Message ---
+            # --- 保存并输出最终助手消息 ---
+            # 如果累积了内容，则处理并保存为完整的助手消息
             if accumulated_content:
-                # ... (Truncate accumulated_content logic) ...
+                # ... (截断累积内容的逻辑) ...
+                # 如果XML工具调用达到上限且存在缓冲区内容，截断内容至最后一个XML块
                 if config.max_xml_tool_calls > 0 and xml_tool_call_count >= config.max_xml_tool_calls and xml_chunks_buffer:
                     last_xml_chunk = xml_chunks_buffer[-1]
                     last_chunk_end_pos = accumulated_content.find(last_xml_chunk) + len(last_xml_chunk)
                     if last_chunk_end_pos > 0:
                         accumulated_content = accumulated_content[:last_chunk_end_pos]
 
-                # ... (Extract complete_native_tool_calls logic) ...
-                # Update complete_native_tool_calls from buffer (initialized earlier)
+                # ... (提取完整原生工具调用的逻辑) ...
+                # 从缓冲区更新完整的原生工具调用列表（之前已初始化）
                 if config.native_tool_calling:
                     for idx, tc_buf in tool_calls_buffer.items():
+                        # 确保工具调用ID、函数名和参数都存在
                         if tc_buf['id'] and tc_buf['function']['name'] and tc_buf['function']['arguments']:
                             try:
+                                # 安全解析JSON参数
                                 args = safe_json_parse(tc_buf['function']['arguments'])
                                 complete_native_tool_calls.append({
                                     "id": tc_buf['id'], "type": "function",
                                     "function": {"name": tc_buf['function']['name'],"arguments": args}
                                 })
-                            except json.JSONDecodeError: continue
+                            except json.JSONDecodeError: 
+                                # JSON解析失败时跳过此工具调用
+                                continue
 
-                message_data = { # Dict to be saved in 'content'
-                    "role": "assistant", "content": accumulated_content,
-                    "tool_calls": complete_native_tool_calls or None
+                # 构建要保存的消息数据结构
+                message_data = { # 要保存在'content'字段中的字典
+                    "role": "assistant", "content": accumulated_content,  # 助手角色和累积内容
+                    "tool_calls": complete_native_tool_calls or None  # 原生工具调用列表（可为空）
                 }
 
+                # 调用内部方法保存助手消息，包含代理信息
                 last_assistant_message_object = await self._add_message_with_agent_info(
                     thread_id=thread_id, type="assistant", content=message_data,
                     is_llm_message=True, metadata={"thread_run_id": thread_run_id}
                 )
 
+                # 如果成功保存了助手消息
                 if last_assistant_message_object:
-                    # Yield the complete saved object, adding stream_status metadata just for yield
+                    # 为输出准备完整的已保存对象，仅用于输出的添加stream_status元数据
                     yield_metadata = ensure_dict(last_assistant_message_object.get('metadata'), {})
-                    yield_metadata['stream_status'] = 'complete'
-                    # Format the message for yielding
+                    yield_metadata['stream_status'] = 'complete'  # 标记流状态为完成
+                    # 格式化消息用于输出
                     yield_message = last_assistant_message_object.copy()
                     yield_message['metadata'] = yield_metadata
                     yield format_for_yield(yield_message)
                 else:
-                    logger.error(f"Failed to save final assistant message for thread {thread_id}")
-                    self.trace.event(name="failed_to_save_final_assistant_message_for_thread", level="ERROR", status_message=(f"Failed to save final assistant message for thread {thread_id}"))
-                    # Save and yield an error status
-                    err_content = {"role": "system", "status_type": "error", "message": "Failed to save final assistant message"}
+                    # 保存助手消息失败时的错误处理
+                    logger.error(f"无法为线程 {thread_id} 保存最终助手消息")
+                    self.trace.event(name="failed_to_save_final_assistant_message_for_thread", level="ERROR", status_message=(f"无法为线程 {thread_id} 保存最终助手消息"))
+                    # 保存并输出错误状态
+                    err_content = {"role": "system", "status_type": "error", "message": "无法保存最终助手消息"}
                     err_msg_obj = await self.add_message(
                         thread_id=thread_id, type="status", content=err_content, 
                         is_llm_message=False, metadata={"thread_run_id": thread_run_id}
@@ -1154,107 +1241,109 @@ class ResponseProcessor:
             return None
 
     def _extract_xml_chunks(self, content: str) -> List[str]:
-        """Extract complete XML chunks using start and end pattern matching."""
-        chunks = []
-        pos = 0
+        """使用起始和结束模式匹配提取完整的XML块。"""
+        chunks = []  # 存储提取到的所有完整XML块
+        pos = 0  # 当前搜索位置的指针
         
         try:
-            # First, look for new format <function_calls> blocks
+            # 首先查找新格式的<function_calls>块
             start_pattern = '<function_calls>'
             end_pattern = '</function_calls>'
             
             while pos < len(content):
-                # Find the next function_calls block
+                # 查找下一个function_calls块的起始位置
                 start_pos = content.find(start_pattern, pos)
-                if start_pos == -1:
+                if start_pos == -1:  # 未找到起始标签，退出循环
                     break
                 
-                # Find the matching end tag
+                # 查找匹配的结束标签
                 end_pos = content.find(end_pattern, start_pos)
-                if end_pos == -1:
+                if end_pos == -1:  # 未找到结束标签，退出循环
                     break
                 
-                # Extract the complete block including tags
+                # 提取包括标签在内的完整块
                 chunk_end = end_pos + len(end_pattern)
                 chunk = content[start_pos:chunk_end]
-                chunks.append(chunk)
+                chunks.append(chunk)  # 将完整块添加到结果列表
                 
-                # Move position past this chunk
+                # 移动位置指针，继续查找后续块
                 pos = chunk_end
             
-            # If no new format found, fall back to old format for backwards compatibility
+            # 如果没有找到新格式，回退到旧格式以保持向后兼容性
             if not chunks:
-                pos = 0
+                pos = 0  # 重置搜索位置
                 while pos < len(content):
-                    # Find the next tool tag
+                    # 查找下一个工具标签
                     next_tag_start = -1
                     current_tag = None
                     
-                    # Find the earliest occurrence of any registered tag
+                    # 查找所有已注册标签中最早出现的那个
                     for tag_name in self.tool_registry.xml_tools.keys():
                         start_pattern = f'<{tag_name}'
                         tag_pos = content.find(start_pattern, pos)
                         
+                        # 选择最早出现的标签（位置最小的那个）
                         if tag_pos != -1 and (next_tag_start == -1 or tag_pos < next_tag_start):
                             next_tag_start = tag_pos
                             current_tag = tag_name
                     
                     if next_tag_start == -1 or not current_tag:
-                        break
+                        break  # 没有找到更多标签，退出循环
                     
-                    # Find the matching end tag
+                    # 查找匹配的结束标签
                     end_pattern = f'</{current_tag}>'
-                    tag_stack = []
+                    tag_stack = []  # 用于处理嵌套标签的栈
                     chunk_start = next_tag_start
                     current_pos = next_tag_start
                     
                     while current_pos < len(content):
-                        # Look for next start or end tag of the same type
+                        # 查找下一个起始或结束标签
                         next_start = content.find(f'<{current_tag}', current_pos + 1)
                         next_end = content.find(end_pattern, current_pos)
                         
-                        if next_end == -1:  # No closing tag found
+                        if next_end == -1:  # 未找到结束标签
                             break
                         
                         if next_start != -1 and next_start < next_end:
-                            # Found nested start tag
+                            # 发现嵌套的起始标签，压入栈中
                             tag_stack.append(next_start)
                             current_pos = next_start + 1
                         else:
-                            # Found end tag
-                            if not tag_stack:  # This is our matching end tag
+                            # 发现结束标签
+                            if not tag_stack:  # 栈为空，这是匹配的结束标签
                                 chunk_end = next_end + len(end_pattern)
                                 chunk = content[chunk_start:chunk_end]
-                                chunks.append(chunk)
+                                chunks.append(chunk)  # 添加完整的嵌套标签块
                                 pos = chunk_end
                                 break
                             else:
-                                # Pop nested tag
+                                # 弹出嵌套标签，继续处理
                                 tag_stack.pop()
                                 current_pos = next_end + 1
                     
-                    if current_pos >= len(content):  # Reached end without finding closing tag
+                    if current_pos >= len(content):  # 到达内容末尾但未找到结束标签
                         break
                     
-                    pos = max(pos + 1, current_pos)
+                    pos = max(pos + 1, current_pos)  # 确保向前移动指针
         
         except Exception as e:
-            logger.error(f"Error extracting XML chunks: {e}")
-            logger.error(f"Content was: {content}")
+            # 记录提取过程中的错误，包括原始内容用于调试
+            logger.error(f"提取XML块时出错: {e}")
+            logger.error(f"原始内容为: {content}")
             self.trace.event(name="error_extracting_xml_chunks", level="ERROR", status_message=(f"Error extracting XML chunks: {e}"), metadata={"content": content})
         
-        return chunks
+        return chunks  # 返回提取到的所有XML块列表
 
     def _parse_xml_tool_call(self, xml_chunk: str) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
-        """Parse XML chunk into tool call format and return parsing details.
+        """将XML片段解析为工具调用格式并返回解析详情。
         
         Returns:
-            Tuple of (tool_call, parsing_details) or None if parsing fails.
-            - tool_call: Dict with 'function_name', 'xml_tag_name', 'arguments'
-            - parsing_details: Dict with 'attributes', 'elements', 'text_content', 'root_content'
+            元组 (tool_call, parsing_details) 或在解析失败时返回 None。
+            - tool_call: 包含 'function_name', 'xml_tag_name', 'arguments' 的字典
+            - parsing_details: 包含 'attributes', 'elements', 'text_content', 'root_content' 的字典
         """
         try:
-            # Check if this is the new format (contains <function_calls>)
+            # 检查是否为新格式（包含 <function_calls>）
             if '<function_calls>' in xml_chunk and '<invoke' in xml_chunk:
                 # Use the new XML parser
                 parsed_calls = self.xml_parser.parse_content(xml_chunk)
@@ -1280,8 +1369,8 @@ class ResponseProcessor:
                 logger.debug(f"Parsed new format tool call: {tool_call}")
                 return tool_call, parsing_details
             
-            # Fall back to old format parsing
-            # Extract tag name and validate
+            # 回退到旧格式解析
+            # 提取标签名并验证
             tag_match = re.match(r'<([^\s>]+)', xml_chunk)
             if not tag_match:
                 logger.error(f"No tag found in XML chunk: {xml_chunk}")
@@ -1404,39 +1493,59 @@ class ResponseProcessor:
 
     # Tool execution methods
     async def _execute_tool(self, tool_call: Dict[str, Any]) -> ToolResult:
-        """Execute a single tool call and return the result."""
+        """
+        执行单个工具调用并返回结果。
+        该方法负责实际执行一个工具调用，包括参数解析、函数查找和执行，并处理可能出现的异常。
+        Returns:
+            ToolResult: 工具执行结果，包含成功状态和输出内容
+        """
+        # 创建跟踪跨度，用于监控工具执行过程
         span = self.trace.span(name=f"execute_tool.{tool_call['function_name']}", input=tool_call["arguments"])            
         try:
+            # 提取函数名和参数
             function_name = tool_call["function_name"]
             arguments = tool_call["arguments"]
 
+            # 记录日志，显示正在执行的工具及其参数
             logger.info(f"Executing tool: {function_name} with arguments: {arguments}")
+            # 记录跟踪事件
             self.trace.event(name="executing_tool", level="DEFAULT", status_message=(f"Executing tool: {function_name} with arguments: {arguments}"))
             
+            # 如果参数是字符串，尝试解析为JSON对象
             if isinstance(arguments, str):
                 try:
                     arguments = safe_json_parse(arguments)
                 except json.JSONDecodeError:
+                    # 如果解析失败，将参数作为文本处理
                     arguments = {"text": arguments}
             
-            # Get available functions from tool registry
+            # 从工具注册表获取可用函数
             available_functions = self.tool_registry.get_available_functions()
             
-            # Look up the function by name
+            # 根据函数名查找对应的函数
             tool_fn = available_functions.get(function_name)
             if not tool_fn:
+                # 如果找不到对应函数，记录错误并返回失败结果
                 logger.error(f"Tool function '{function_name}' not found in registry")
                 span.end(status_message="tool_not_found", level="ERROR")
                 return ToolResult(success=False, output=f"Tool function '{function_name}' not found")
             
+            # 记录日志，显示找到函数并开始执行
             logger.debug(f"Found tool function for '{function_name}', executing...")
+            # 执行工具函数
             result = await tool_fn(**arguments)
+            # 记录日志，显示工具执行完成及其结果
             logger.info(f"Tool execution complete: {function_name} -> {result}")
+            # 结束跟踪跨度
             span.end(status_message="tool_executed", output=result)
+            # 返回执行结果
             return result
         except Exception as e:
+            # 捕获并记录执行过程中出现的异常
             logger.error(f"Error executing tool {tool_call['function_name']}: {str(e)}", exc_info=True)
+            # 结束跟踪跨度并标记错误
             span.end(status_message="tool_execution_error", output=f"Error executing tool: {str(e)}", level="ERROR")
+            # 返回包含错误信息的失败结果
             return ToolResult(success=False, output=f"Error executing tool: {str(e)}")
 
     async def _execute_tools(
@@ -1799,27 +1908,39 @@ class ResponseProcessor:
         return structured_result_v1
 
     def _create_tool_context(self, tool_call: Dict[str, Any], tool_index: int, assistant_message_id: Optional[str] = None, parsing_details: Optional[Dict[str, Any]] = None) -> ToolExecutionContext:
-        """Create a tool execution context with display name and parsing details populated."""
+        """
+        创建一个工具执行上下文，包含显示名称和解析详情。
+        Returns:
+            ToolExecutionContext: 包含完整工具执行上下文信息的对象
+        """
+        # 初始化工具执行上下文对象
         context = ToolExecutionContext(
-            tool_call=tool_call,
-            tool_index=tool_index,
-            assistant_message_id=assistant_message_id,
-            parsing_details=parsing_details
+            tool_call=tool_call,           # 原始工具调用信息
+            tool_index=tool_index,         # 工具索引
+            assistant_message_id=assistant_message_id,  # 关联的助手消息ID
+            parsing_details=parsing_details  # 解析详情（主要用于XML工具）
         )
         
-        # Set function_name and xml_tag_name fields
+        # 设置函数名和XML标签名字段
         if "xml_tag_name" in tool_call:
+            # 对于XML工具调用，设置XML标签名和函数名
             context.xml_tag_name = tool_call["xml_tag_name"]
             context.function_name = tool_call.get("function_name", tool_call["xml_tag_name"])
         else:
-            # For non-XML tools, use function name directly
+            # 对于非XML工具，直接使用函数名
             context.function_name = tool_call.get("function_name", "unknown")
             context.xml_tag_name = None
         
         return context
         
     async def _yield_and_save_tool_started(self, context: ToolExecutionContext, thread_id: str, thread_run_id: str) -> Optional[Dict[str, Any]]:
-        """Formats, saves, and returns a tool started status message."""
+        """
+        格式化、保存并返回工具开始执行的状态消息。
+        该方法用于通知系统某个工具已经开始执行，创建一个状态消息并保存到数据库中。
+        Returns:
+            Optional[Dict[str, Any]]: 保存后的完整消息对象，如果保存失败则返回None
+        """
+        
         tool_name = context.xml_tag_name or context.function_name
         content = {
             "role": "assistant", "status_type": "tool_started",

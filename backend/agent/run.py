@@ -56,7 +56,7 @@ async def run_agent(
     # 如果有自定义代理配置，记录代理名称
     if agent_config:
         logger.info(f"Using custom agent: {agent_config.get('name', 'Unknown')}")
-
+ 
     # 如果没有跟踪信息，创建一个新的跟踪
     if not trace:
         trace = langfuse.trace(name="run_agent", session_id=thread_id, metadata={"project_id": project_id})
