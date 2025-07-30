@@ -1,156 +1,156 @@
-# Suna Self-Hosting Guide
+# Suna 自托管指南
 
-This guide provides detailed instructions for setting up and hosting your own instance of Suna, an open-source generalist AI agent.
+本指南提供了设置和托管您自己的 Suna 实例的详细说明，Suna 是一个开源的通用 AI 代理。
 
-## Table of Contents
+## 目录
 
-- [Overview](#overview)
-- [Prerequisites](#prerequisites)
-- [Installation Steps](#installation-steps)
-- [Manual Configuration](#manual-configuration)
-- [Post-Installation Steps](#post-installation-steps)
-- [Troubleshooting](#troubleshooting)
+- [概述](#概述)
+- [前提条件](#前提条件)
+- [安装步骤](#安装步骤)
+- [手动配置](#手动配置)
+- [安装后步骤](#安装后步骤)
+- [故障排除](#故障排除)
 
-## Overview
+## 概述
 
-Suna consists of four main components:
+Suna 由四个主要组件组成：
 
-1. **Backend API** - Python/FastAPI service for REST endpoints, thread management, and LLM integration
-2. **Backend Worker** - Python/Dramatiq worker service for handling agent tasks
-3. **Frontend** - Next.js/React application providing the user interface
-4. **Agent Docker** - Isolated execution environment for each agent
-5. **Supabase Database** - Handles data persistence and authentication
+1. **后端 API** - Python/FastAPI 服务，用于 REST 端点、线程管理和 LLM 集成
+2. **后端 Worker** - Python/Dramatiq worker 服务，用于处理代理任务
+3. **前端** - Next.js/React 应用程序，提供用户界面
+4. **代理 Docker** - 每个代理的隔离执行环境
+5. **Supabase 数据库** - 处理数据持久化和身份验证
 
-## Prerequisites
+## 前提条件
 
-Before starting the installation process, you'll need to set up the following:
+在开始安装过程之前，您需要设置以下内容：
 
-### 1. Supabase Project
+### 1. Supabase 项目
 
-1. Create an account at [Supabase](https://supabase.com/)
-2. Create a new project
-3. Note down the following information (found in Project Settings → API):
-   - Project URL (e.g., `https://abcdefg.supabase.co`)
-   - API keys (anon key and service role key)
+1. 在 [Supabase](https://supabase.com/) 创建账户
+2. 创建一个新项目
+3. 记下以下信息（在项目设置 → API 中找到）：
+   - 项目 URL（例如，`https://abcdefg.supabase.co`）
+   - API 密钥（匿名密钥和服务角色密钥）
 
-### 2. API Keys
+### 2. API 密钥
 
-Obtain the following API keys:
+获取以下 API 密钥：
 
-#### Required
+#### 必需
 
-- **LLM Provider** (at least one of the following):
+- **LLM 提供商**（至少一个）：
 
-  - [Anthropic](https://console.anthropic.com/) - Recommended for best performance
+  - [Anthropic](https://console.anthropic.com/) - 推荐用于最佳性能
   - [OpenAI](https://platform.openai.com/)
   - [Groq](https://console.groq.com/)
   - [OpenRouter](https://openrouter.ai/)
   - [AWS Bedrock](https://aws.amazon.com/bedrock/)
 
-- **Search and Web Scraping**:
+- **搜索和网络抓取**：
 
-  - [Tavily](https://tavily.com/) - For enhanced search capabilities
-  - [Firecrawl](https://firecrawl.dev/) - For web scraping capabilities
+  - [Tavily](https://tavily.com/) - 用于增强搜索功能
+  - [Firecrawl](https://firecrawl.dev/) - 用于网络抓取功能
 
-- **Agent Execution**:
-  - [Daytona](https://app.daytona.io/) - For secure agent execution
+- **代理执行**：
+  - [Daytona](https://app.daytona.io/) - 用于安全代理执行
 
-- **Background Job Processing**:
-  - [QStash](https://console.upstash.com/qstash) - For workflows, automated tasks, and webhook handling
+- **后台作业处理**：
+  - [QStash](https://console.upstash.com/qstash) - 用于工作流、自动化任务和 webhook 处理
 
-#### Optional
+#### 可选
 
-- **RapidAPI** - For accessing additional API services (enables LinkedIn scraping and other tools)
-- **Smithery** - For custom agents and workflows ([Get API key](https://smithery.ai/))
+- **RapidAPI** - 用于访问额外的 API 服务（启用 LinkedIn 抓取和其他工具）
+- **Smithery** - 用于自定义代理和工作流（[获取 API 密钥](https://smithery.ai/)）
 
-### 3. Required Software
+### 3. 必需软件
 
-Ensure the following tools are installed on your system:
+确保您的系统上安装了以下工具：
 
 - **[Docker](https://docs.docker.com/get-docker/)**
 - **[Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started)**
 - **[Git](https://git-scm.com/downloads)**
 - **[Python 3.11](https://www.python.org/downloads/)**
 
-For manual setup, you'll also need:
+对于手动设置，您还需要：
 
 - **[uv](https://docs.astral.sh/uv/)**
 - **[Node.js & npm](https://nodejs.org/en/download/)**
 
-## Installation Steps
+## 安装步骤
 
-### 1. Clone the Repository
+### 1. 克隆仓库
 
 ```bash
 git clone https://github.com/kortix-ai/suna.git
 cd suna
 ```
 
-### 2. Run the Setup Wizard
+### 2. 运行设置向导
 
-The setup wizard will guide you through the installation process:
+设置向导将指导您完成安装过程：
 
 ```bash
 python setup.py
 ```
 
-The wizard will:
+向导将：
 
-- Check if all required tools are installed
-- Collect your API keys and configuration information
-- Set up the Supabase database
-- Configure environment files
-- Install dependencies
-- Start Suna using your preferred method
+- 检查是否安装了所有必需的工具
+- 收集您的 API 密钥和配置信息
+- 设置 Supabase 数据库
+- 配置环境文件
+- 安装依赖项
+- 使用您首选的方法启动 Suna
 
-The setup wizard has 14 steps and includes progress saving, so you can resume if interrupted.
+设置向导有 14 个步骤，包括进度保存，因此如果中断，您可以恢复。
 
-### 3. Supabase Configuration
+### 3. Supabase 配置
 
-During setup, you'll need to:
+在设置期间，您需要：
 
-1. Log in to the Supabase CLI
-2. Link your local project to your Supabase project
-3. Push database migrations
-4. Manually expose the 'basejump' schema in Supabase:
-   - Go to your Supabase project
-   - Navigate to Project Settings → API
-   - Add 'basejump' to the Exposed Schema section
+1. 登录到 Supabase CLI
+2. 将本地项目链接到您的 Supabase 项目
+3. 推送数据库迁移
+4. 在 Supabase 中手动公开 'basejump' 模式：
+   - 转到您的 Supabase 项目
+   - 导航到项目设置 → API
+   - 将 'basejump' 添加到公开模式部分
 
-### 4. Daytona Configuration
+### 4. Daytona 配置
 
-As part of the setup, you'll need to:
+作为设置的一部分，您需要：
 
-1. Create a Daytona account
-2. Generate an API key
-3. Create a Snapshot:
-   - Name: `kortix/suna:0.1.3`
-   - Image name: `kortix/suna:0.1.3`
-   - Entrypoint: `/usr/bin/supervisord -n -c /etc/supervisor/conf.d/supervisord.conf`
+1. 创建 Daytona 账户
+2. 生成 API 密钥
+3. 创建快照：
+   - 名称：`kortix/suna:0.1.3`
+   - 镜像名称：`kortix/suna:0.1.3`
+   - 入口点：`/usr/bin/supervisord -n -c /etc/supervisor/conf.d/supervisord.conf`
 
-### 5. QStash Configuration
+### 5. QStash 配置
 
-QStash is required for background job processing, workflows, and webhook handling:
+QStash 是后台作业处理、工作流和 webhook 处理所必需的：
 
-1. Create an account at [Upstash Console](https://console.upstash.com/qstash)
-2. Get your QStash token and signing keys
-3. Configure a publicly accessible webhook base URL for workflow callbacks
+1. 在 [Upstash 控制台](https://console.upstash.com/qstash) 创建账户
+2. 获取您的 QStash 令牌和签名密钥
+3. 配置公开可访问的 webhook 基本 URL 用于工作流回调
 
-## Manual Configuration
+## 手动配置
 
-If you prefer to configure your installation manually, or if you need to modify the configuration after installation, here's what you need to know:
+如果您希望手动配置安装，或者需要在安装后修改配置，以下是您需要了解的内容：
 
-### Backend Configuration (.env)
+### 后端配置 (.env)
 
-The backend configuration is stored in `backend/.env`
+后端配置存储在 `backend/.env` 中
 
-Example configuration:
+示例配置：
 
 ```sh
-# Environment Mode
+# 环境模式
 ENV_MODE=local
 
-# DATABASE
+# 数据库
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
@@ -165,49 +165,49 @@ REDIS_SSL=false
 RABBITMQ_HOST=rabbitmq
 RABBITMQ_PORT=5672
 
-# LLM Providers
+# LLM 提供商
 ANTHROPIC_API_KEY=your-anthropic-key
 OPENAI_API_KEY=your-openai-key
 OPENROUTER_API_KEY=your-openrouter-key
 MODEL_TO_USE=anthropic/claude-sonnet-4-20250514
 
-# WEB SEARCH
+# 网络搜索
 TAVILY_API_KEY=your-tavily-key
 
-# WEB SCRAPE
+# 网络抓取
 FIRECRAWL_API_KEY=your-firecrawl-key
 FIRECRAWL_URL=https://api.firecrawl.dev
 
-# Sandbox container provider
-DAYTONA_API_KEY=your-daytona-key
+# 沙箱容器提供商
+DAYTONA_API_KEY=dtn_0881fbd32371e9d5d6200b3c9f8eb344b9d06341401f91d0bfde1e249bd892cd
 DAYTONA_SERVER_URL=https://app.daytona.io/api
 DAYTONA_TARGET=us
 
-# Background job processing (Required)
+# 后台作业处理（必需）
 QSTASH_URL=https://qstash.upstash.io
 QSTASH_TOKEN=your-qstash-token
 QSTASH_CURRENT_SIGNING_KEY=your-current-signing-key
 QSTASH_NEXT_SIGNING_KEY=your-next-signing-key
 WEBHOOK_BASE_URL=https://yourdomain.com
 
-# MCP Configuration
+# MCP 配置
 MCP_CREDENTIAL_ENCRYPTION_KEY=your-generated-encryption-key
 
-# Optional APIs
+# 可选 API
 RAPID_API_KEY=your-rapidapi-key
 SMITHERY_API_KEY=your-smithery-key
 
 NEXT_PUBLIC_URL=http://localhost:3000
 ```
 
-### Frontend Configuration (.env.local)
+### 前端配置 (.env.local)
 
-The frontend configuration is stored in `frontend/.env.local` and includes:
+前端配置存储在 `frontend/.env.local` 中，包括：
 
-- Supabase connection details
-- Backend API URL
+- Supabase 连接详情
+- 后端 API URL
 
-Example configuration:
+示例配置：
 
 ```sh
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
@@ -217,127 +217,127 @@ NEXT_PUBLIC_URL=http://localhost:3000
 NEXT_PUBLIC_ENV_MODE=LOCAL
 ```
 
-## Post-Installation Steps
+## 安装后步骤
 
-After completing the installation, you'll need to:
+完成安装后，您需要：
 
-1. **Create an account** - Use Supabase authentication to create your first account
-2. **Verify installations** - Check that all components are running correctly
+1. **创建账户** - 使用 Supabase 身份验证创建您的第一个账户
+2. **验证安装** - 检查所有组件是否正确运行
 
-## Startup Options
+## 启动选项
 
-Suna can be started in two ways:
+Suna 可以通过两种方式启动：
 
-### 1. Using Docker Compose (Recommended)
+### 1. 使用 Docker Compose（推荐）
 
-This method starts all required services in Docker containers:
+此方法在 Docker 容器中启动所有必需的服务：
 
 ```bash
-docker compose up -d # Use `docker compose down` to stop it later
-# or
-python start.py # Use the same to stop it later
+docker compose up -d # 稍后使用 `docker compose down` 停止
+# 或
+python start.py # 稍后使用相同的命令停止
 ```
 
-### 2. Manual Startup
+### 2. 手动启动
 
-This method requires you to start each component separately:
+此方法需要您分别启动每个组件：
 
-1. Start Redis and RabbitMQ (required for backend):
+1. 启动 Redis 和 RabbitMQ（后端必需）：
 
 ```bash
 docker compose up redis rabbitmq -d
-# or
-python start.py # Use the same to stop it later
+# 或
+python start.py # 稍后使用相同的命令停止
 ```
 
-2. Start the frontend (in one terminal):
+2. 启动前端（在一个终端中）：
 
 ```bash
 cd frontend
 npm run dev
 ```
 
-3. Start the backend (in another terminal):
+3. 启动后端（在另一个终端中）：
 
 ```bash
 cd backend
 uv run api.py
 ```
 
-4. Start the worker (in one more terminal):
+4. 启动工作进程（在另一个终端中）：
 
 ```bash
 cd backend
 uv run dramatiq run_agent_background
 ```
 
-## Troubleshooting
+## 故障排除
 
-### Common Issues
+### 常见问题
 
-1. **Docker services not starting**
+1. **Docker 服务未启动**
 
-   - Check Docker logs: `docker compose logs`
-   - Ensure Docker is running correctly
-   - Verify port availability (3000 for frontend, 8000 for backend)
+   - 检查 Docker 日志：`docker compose logs`
+   - 确保 Docker 正确运行
+   - 验证端口可用性（前端 3000，后端 8000）
 
-2. **Database connection issues**
+2. **数据库连接问题**
 
-   - Verify Supabase configuration
-   - Check if 'basejump' schema is exposed in Supabase
+   - 验证 Supabase 配置
+   - 检查 'basejump' 模式是否在 Supabase 中公开
 
-3. **LLM API key issues**
+3. **LLM API 密钥问题**
 
-   - Verify API keys are correctly entered
-   - Check for API usage limits or restrictions
+   - 验证 API 密钥是否正确输入
+   - 检查 API 使用限制或限制
 
-4. **Daytona connection issues**
+4. **Daytona 连接问题**
 
-   - Verify Daytona API key
-   - Check if the container image is correctly configured
+   - 验证 Daytona API 密钥
+   - 检查容器镜像是否正确配置
 
-5. **QStash/Webhook issues**
+5. **QStash/Webhook 问题**
 
-   - Verify QStash token and signing keys
-   - Ensure webhook base URL is publicly accessible
-   - Check QStash console for delivery status
+   - 验证 QStash 令牌和签名密钥
+   - 确保 webhook 基本 URL 公开可访问
+   - 检查 QStash 控制台中的传递状态
 
-6. **Setup wizard issues**
+6. **设置向导问题**
 
-   - Delete `.setup_progress` file to reset the setup wizard
-   - Check that all required tools are installed and accessible
+   - 删除 `.setup_progress` 文件以重置设置向导
+   - 检查是否安装了所有必需的工具并可访问
 
-### Logs
+### 日志
 
-To view logs and diagnose issues:
+查看日志并诊断问题：
 
 ```bash
-# Docker Compose logs
+# Docker Compose 日志
 docker compose logs -f
 
-# Frontend logs (manual setup)
+# 前端日志（手动设置）
 cd frontend
 npm run dev -- --turbopack
 
-# Backend logs (manual setup)
+# 后端日志（手动设置）
 cd backend
 uv run api.py
 
-# Worker logs (manual setup)
+# 工作进程日志（手动设置）
 cd backend
 uv run dramatiq run_agent_background
 ```
 
-### Resuming Setup
+### 恢复设置
 
-If the setup wizard is interrupted, you can resume from where you left off by running:
+如果设置向导中断，您可以通过运行以下命令从上次中断的地方继续：
 
 ```bash
 python setup.py
 ```
 
-The wizard will detect your progress and continue from the last completed step.
+向导将检测您的进度并从最后完成的步骤继续。
 
 ---
 
-For further assistance, join the [Suna Discord Community](https://discord.gg/Py6pCBUUPw) or check the [GitHub repository](https://github.com/kortix-ai/suna) for updates and issues.
+如需进一步帮助，请加入 [Suna Discord 社区](https://discord.gg/Py6pCBUUPw) 或查看 [GitHub 仓库](https://github.com/kortix-ai/suna) 获取更新和问题。

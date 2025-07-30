@@ -729,6 +729,19 @@ class SetupWizard:
                     default_value=existing_value,
                 )
                 self.env_vars["llm"][key] = api_key
+                
+                # 如果是OpenAI，询问base_url
+                if key == "OPENAI_API_KEY" and api_key:
+                    existing_base_url = self.env_vars["llm"].get("OPENAI_BASE_URL", "")
+                    base_url = self._get_input(
+                        "Enter OpenAI base URL (optional, press Enter to use default): ",
+                        validate_url if existing_base_url else None,
+                        "Invalid URL format.",
+                        allow_empty=True,
+                        default_value=existing_base_url,
+                    )
+                    if base_url:
+                        self.env_vars["llm"]["OPENAI_BASE_URL"] = base_url
 
         # Set a default model if not already set
         if not self.env_vars["llm"].get("MODEL_TO_USE"):

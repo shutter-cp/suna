@@ -172,6 +172,7 @@ class Configuration:
     # LLM API keys
     ANTHROPIC_API_KEY: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
+    OPENAI_BASE_URL: Optional[str] = None
     GROQ_API_KEY: Optional[str] = None
     OPENROUTER_API_KEY: Optional[str] = None
     XAI_API_KEY: Optional[str] = None
@@ -315,4 +316,4 @@ class Configuration:
         }
 
 # Create a singleton instance
-config = Configuration() 
+config = Configuration()

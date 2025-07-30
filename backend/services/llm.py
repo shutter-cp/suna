@@ -46,6 +46,11 @@ def setup_api_keys() -> None:
         else:
             logger.warning(f"No API key found for provider: {provider}")
 
+    # Set up OpenAI base URL if provided
+    if config.OPENAI_API_KEY and config.OPENAI_BASE_URL:
+        os.environ['OPENAI_API_BASE'] = config.OPENAI_BASE_URL
+        logger.debug(f"Set OPENAI_API_BASE to {config.OPENAI_BASE_URL}")
+
     # Set up OpenRouter API base if not already set
     if config.OPENROUTER_API_KEY and config.OPENROUTER_API_BASE:
         os.environ['OPENROUTER_API_BASE'] = config.OPENROUTER_API_BASE

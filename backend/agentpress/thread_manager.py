@@ -150,12 +150,12 @@ class ThreadManager:
             
             while True:
                 # 从messages表查询指定thread_id的消息
-                result = await client.table('messages')
-                    .select('message_id, content')
-                    .eq('thread_id', thread_id)
-                    .eq('is_llm_message', True)
-                    .order('created_at')
-                    .range(offset, offset + batch_size - 1)
+                result = await client.table('messages') \
+                    .select('message_id, content') \
+                    .eq('thread_id', thread_id) \
+                    .eq('is_llm_message', True) \
+                    .order('created_at') \
+                    .range(offset, offset + batch_size - 1) \
                     .execute()
                 
                 # 如果没有数据或数据为空则终止循环
