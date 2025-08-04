@@ -416,12 +416,26 @@ class ContextManager:
         return final_messages
     
     def middle_out_messages(self, messages: List[Dict[str, Any]], max_messages: int = 320) -> List[Dict[str, Any]]:
-        """Remove messages from the middle of the list, keeping max_messages total."""
+        """从消息列表中间删除消息，保留最多max_messages条消息
+        
+        当消息数量超过指定的最大值时，该函数会从消息列表的中间部分开始删除消息，
+        保留列表开头和结尾的消息，以确保重要的上下文信息不丢失。
+        
+        Args:
+            messages (List[Dict[str, Any]]): 原始消息列表
+            max_messages (int, optional): 保留的最大消息数量，默认为320条
+        
+        Returns:
+            List[Dict[str, Any]]: 处理后的消息列表，长度不超过max_messages
+        """
+        # 如果消息数量未超过最大值，直接返回原列表
         if len(messages) <= max_messages:
             return messages
         
-        # Keep half from the beginning and half from the end
+        # 计算需要保留的开头和结尾消息数量
+        # 开头保留一半，结尾保留另一半（如果max_messages是奇数，结尾多保留一条）
         keep_start = max_messages // 2
         keep_end = max_messages - keep_start
         
+        # 合并开头和结尾保留的消息
         return messages[:keep_start] + messages[-keep_end:]

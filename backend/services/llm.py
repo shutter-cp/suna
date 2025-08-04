@@ -136,14 +136,14 @@ def prepare_params(
 
     if api_key:
         params["api_key"] = api_key
-    
+
     # Check if OPENAI_BASE_URL is configured and override api_base for all models
     if config.OPENAI_BASE_URL:
         params["api_base"] = config.OPENAI_BASE_URL
         logger.debug(f"Using OPENAI_BASE_URL for all models: {config.OPENAI_BASE_URL}")
     elif api_base:
         params["api_base"] = api_base
-        
+
     if model_id:
         params["model_id"] = model_id
 
@@ -281,34 +281,36 @@ async def make_llm_api_call(
     reasoning_effort: Optional[str] = 'low'
 ) -> Union[Dict[str, Any], AsyncGenerator, ModelResponse]:
     """
-    Make an API call to a language model using LiteLLM.
+    使用LiteLLM调用语言模型的API接口函数，支持多种模型提供商（OpenAI、Anthropic、Google等）
 
     Args:
-        messages: List of message dictionaries for the conversation
-        model_name: Name of the model to use (e.g., "gpt-4", "claude-3", "openrouter/openai/gpt-4", "bedrock/anthropic.claude-3-sonnet-20240229-v1:0")
-        response_format: Desired format for the response
-        temperature: Sampling temperature (0-1)
-        max_tokens: Maximum tokens in the response
-        tools: List of tool definitions for function calling
-        tool_choice: How to select tools ("auto" or "none")
-        api_key: Override default API key
-        api_base: Override default API base URL
-        stream: Whether to stream the response
-        top_p: Top-p sampling parameter
-        model_id: Optional ARN for Bedrock inference profiles
-        enable_thinking: Whether to enable thinking
-        reasoning_effort: Level of reasoning effort
+        messages: 对话消息列表，每个元素是一个包含角色和内容的字典
+        model_name: 要使用的模型名称（例如："gpt-4", "claude-3", "openrouter/openai/gpt-4"）
+        response_format: 响应格式要求（如JSON模式）
+        temperature: 采样温度参数，控制输出的随机性（0-1之间）
+        max_tokens: 响应中最大生成的token数量
+        tools: 可供模型调用的工具函数定义列表
+        tool_choice: 工具选择策略（"auto"自动选择或"none"不使用工具）
+        api_key: 自定义API密钥（覆盖默认配置）
+        api_base: 自定义API基础URL（覆盖默认配置）
+        stream: 是否启用流式响应
+        top_p: 核采样参数，控制生成多样性
+        model_id: AWS Bedrock推理配置的ARN标识符
+        enable_thinking: 是否启用模型的深度思考模式
+        reasoning_effort: 推理努力程度（'low', 'medium', 'high'）
 
     Returns:
-        Union[Dict[str, Any], AsyncGenerator]: API response or stream
+        Union[Dict[str, Any], AsyncGenerator]: API响应结果或流式生成器
 
     Raises:
-        LLMRetryError: If API call fails after retries
-        LLMError: For other API-related errors
+        LLMRetryError: 当API调用在多次重试后仍然失败时抛出
+        LLMError: 其他与API相关的错误
     """
-    # debug <timestamp>.json messages
+    # 记录日志：显示正在调用的模型信息及思考模式设置
     logger.info(f"Making LLM API call to model: {model_name} (Thinking: {enable_thinking}, Effort: {reasoning_effort})")
     logger.info(f"📡 API Call: Using model {model_name}")
+
+    # 准备API调用参数，根据模型类型和配置进行特定处理
     params = prepare_params(
         messages=messages,
         model_name=model_name,
@@ -326,30 +328,47 @@ async def make_llm_api_call(
         reasoning_effort=reasoning_effort
     )
     print(params)
+
+    # 保存最后一次错误信息，用于重试失败后的错误报告
     last_error = None
+
+    # 执行最大重试次数的循环，处理可能的API调用异常
     for attempt in range(MAX_RETRIES):
         try:
+            # 记录当前尝试次数
             logger.debug(f"Attempt {attempt + 1}/{MAX_RETRIES}")
-            # logger.debug(f"API request parameters: {json.dumps(params, indent=2)}")
 
+            # 使用LiteLLM异步调用API，传入准备好的参数
             response = await litellm.acompletion(**params)
+
+            # 记录成功获取API响应的日志
             logger.debug(f"Successfully received API response from {model_name}")
-            # logger.debug(f"Response: {response}")
+
+            # 返回API响应结果
             return response
 
+        # 处理特定的可重试异常：速率限制、OpenAI错误、JSON解析错误
         except (litellm.exceptions.RateLimitError, OpenAIError, json.JSONDecodeError) as e:
+            # 保存当前错误信息
             last_error = e
+
+            # 调用错误处理函数，可能包含延迟重试逻辑
             await handle_error(e, attempt, MAX_RETRIES)
 
+        # 处理其他未预期的异常
         except Exception as e:
+            # 记录详细错误日志
             logger.error(f"Unexpected error during API call: {str(e)}", exc_info=True)
+
+            # 抛出自定义LLM错误
             raise LLMError(f"API call failed: {str(e)}")
 
+    # 如果所有重试都失败，构建并抛出重试失败错误
     error_msg = f"Failed to make API call after {MAX_RETRIES} attempts"
     if last_error:
         error_msg += f". Last error: {str(last_error)}"
     logger.error(error_msg, exc_info=True)
     raise LLMRetryError(error_msg)
 
-# Initialize API keys on module import
+# 在模块导入时初始化API密钥配置
 setup_api_keys()

@@ -611,6 +611,7 @@ async def run_agent(
                 generation=generation
             )
 
+            # 检查run_thread返回的响应是否为错误响应
             if isinstance(response, dict) and "status" in response and response["status"] == "error":
                 logger.error(f"Error response from run_thread: {response.get('message', 'Unknown error')}")
                 if trace:
@@ -618,30 +619,30 @@ async def run_agent(
                 yield response
                 break
 
-            # Track if we see ask, complete, or web-browser-takeover tool calls
+            # 跟踪是否看到ask、complete或web-browser-takeover工具调用
             last_tool_call = None
             agent_should_terminate = False
 
-            # Process the response
+            # 处理响应
             error_detected = False
             full_response = ""
             try:
-                # Check if response is iterable (async generator) or a dict (error case)
+                # 检查响应是否为可迭代对象(async generator)或字典(错误情况)
                 if hasattr(response, '__aiter__') and not isinstance(response, dict):
                     async for chunk in response:
-                        # If we receive an error chunk, we should stop after this iteration
+                        # 如果接收到错误块，应在本次迭代后停止
                         if isinstance(chunk, dict) and chunk.get('type') == 'status' and chunk.get('status') == 'error':
                             logger.error(f"Error chunk detected: {chunk.get('message', 'Unknown error')}")
                             if trace:
                                 trace.event(name="error_chunk_detected", level="ERROR", status_message=(f"{chunk.get('message', 'Unknown error')}"))
                             error_detected = True
-                            yield chunk  # Forward the error chunk
-                            continue     # Continue processing other chunks but don't break yet
+                            yield chunk  # 转发错误块
+                            continue     # 继续处理其他块但不中断
                         
-                        # Check for termination signal in status messages
+                        # 检查状态消息中的终止信号
                         if chunk.get('type') == 'status':
                             try:
-                                # Parse the metadata to check for termination signal
+                                # 解析元数据以检查终止信号
                                 metadata = chunk.get('metadata', {})
                                 if isinstance(metadata, str):
                                     metadata = json.loads(metadata)
@@ -652,7 +653,7 @@ async def run_agent(
                                     if trace:
                                         trace.event(name="agent_termination_signal_detected", level="DEFAULT", status_message="Agent termination signal detected in status message")
                                     
-                                    # Extract the tool name from the status content if available
+                                    # 如果可用，从状态内容中提取工具名称
                                     content = chunk.get('content', {})
                                     if isinstance(content, str):
                                         content = json.loads(content)
@@ -665,17 +666,17 @@ async def run_agent(
                             except Exception as e:
                                 logger.debug(f"Error parsing status message for termination check: {e}")
                             
-                        # Check for XML versions like <ask>, <complete>, or <web-browser-takeover> in assistant content chunks
+                        # 检查assistant内容块中的XML版本如<ask>、<complete>或<web-browser-takeover>
                         if chunk.get('type') == 'assistant' and 'content' in chunk:
                             try:
-                                # The content field might be a JSON string or object
+                                # 内容字段可能是JSON字符串或对象
                                 content = chunk.get('content', '{}')
                                 if isinstance(content, str):
                                     assistant_content_json = json.loads(content)
                                 else:
                                     assistant_content_json = content
 
-                                # The actual text content is nested within
+                                # 实际文本内容嵌套在内部
                                 assistant_text = assistant_content_json.get('content', '')
                                 full_response += assistant_text
                                 if isinstance(assistant_text, str):
@@ -693,7 +694,7 @@ async def run_agent(
                                            trace.event(name="agent_used_xml_tool", level="DEFAULT", status_message=(f"Agent used XML tool: {xml_tool}"))
                             
                             except json.JSONDecodeError:
-                                # Handle cases where content might not be valid JSON
+                                # 处理内容可能不是有效JSON的情况
                                 logger.warning(f"Warning: Could not parse assistant content JSON: {chunk.get('content')}")
                                 if trace:
                                     trace.event(name="warning_could_not_parse_assistant_content_json", level="WARNING", status_message=(f"Warning: Could not parse assistant content JSON: {chunk.get('content')}"))
@@ -704,11 +705,11 @@ async def run_agent(
 
                         yield chunk
                 else:
-                    # Response is not iterable, likely an error dict
+                    # 响应不可迭代，可能是错误字典
                     logger.error(f"Response is not iterable: {response}")
                     error_detected = True
 
-                # Check if we should stop based on the last tool call or error
+                # 根据最后一个工具调用或错误检查是否应停止
                 if error_detected:
                     logger.info(f"Stopping due to error detected in response")
                     if trace:
@@ -726,7 +727,7 @@ async def run_agent(
                     continue_execution = False
 
             except Exception as e:
-                # Just log the error and re-raise to stop all iterations
+                # 记录错误并重新抛出以停止所有迭代
                 error_msg = f"Error during response streaming: {str(e)}"
                 logger.error(f"Error: {error_msg}")
                 if trace:
@@ -738,7 +739,7 @@ async def run_agent(
                     "status": "error",
                     "message": error_msg
                 }
-                # Stop execution immediately on any error
+                # 遇到任何错误立即停止执行
                 break
                 
         except Exception as e:

@@ -147,25 +147,17 @@ class ResponseProcessor:
         llm_model: str,
         config: ProcessorConfig = ProcessorConfig(),
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """
-        处理流式LLM响应，处理工具调用和执行。
+        """处理流式LLM响应，处理工具调用和执行。
         
         参数:
             llm_response: 来自LLM的流式响应
-            thread_id: 对话线程ID
+            thread_id: 对话线程的ID
             prompt_messages: 发送给LLM的消息列表（提示）
             llm_model: 使用的LLM模型名称
             config: 解析和执行的配置
             
-        返回:
-            AsyncGenerator: 符合数据库模式的完整消息对象，但内容为块状
-            
-        处理流程:
-            1. 初始化各种缓冲区和状态变量
-            2. 处理流式响应中的每个块
-            3. 识别和处理工具调用
-            4. 执行工具并生成结果
-            5. 生成响应流
+        生成:
+            符合数据库模式的完整消息对象，但内容块除外。
         """
         # 初始化累积内容和各种缓冲区
         accumulated_content = "" # 累积的文本内容
@@ -218,7 +210,7 @@ class ResponseProcessor:
                 metadata={"thread_run_id": thread_run_id}  # 元数据包含线程运行ID
             )
             # 如果消息对象创建成功，则生成该消息
-            if start_msg_obj: 
+            if start_msg_obj:
                 yield format_for_yield(start_msg_obj)
 
             # 创建助手响应开始状态消息
@@ -234,7 +226,7 @@ class ResponseProcessor:
                 metadata={"thread_run_id": thread_run_id}  # 元数据包含线程运行ID
             )
             # 如果消息对象创建成功，则生成该消息
-            if assist_start_msg_obj: 
+            if assist_start_msg_obj:
                 yield format_for_yield(assist_start_msg_obj)
             # --- 结束开始事件 ---
 
@@ -251,22 +243,22 @@ class ResponseProcessor:
                 
                 # 从响应数据块中提取核心元数据信息
                 # 这些数据用于构建完整的响应记录和监控分析
-                
+
                 # 提取响应创建时间戳（Unix时间戳格式）
                 if hasattr(chunk, 'created') and chunk.created:
                     streaming_metadata["created"] = chunk.created
-                    
+
                 # 提取使用的AI模型名称（如gpt-4, claude-3等）
                 if hasattr(chunk, 'model') and chunk.model:
                     streaming_metadata["model"] = chunk.model
-                    
+
                 # 提取token使用量统计（如果提供商返回了使用数据）
                 if hasattr(chunk, 'usage') and chunk.usage:
                     # 更新token使用信息（包括零值情况）
                     # prompt_tokens: 输入提示消耗的token数量
                     if hasattr(chunk.usage, 'prompt_tokens') and chunk.usage.prompt_tokens is not None:
                         streaming_metadata["usage"]["prompt_tokens"] = chunk.usage.prompt_tokens
-                    # completion_tokens: 生成回复消耗的token数量  
+                    # completion_tokens: 生成回复消耗的token数量
                     if hasattr(chunk.usage, 'completion_tokens') and chunk.usage.completion_tokens is not None:
                         streaming_metadata["usage"]["completion_tokens"] = chunk.usage.completion_tokens
                     # total_tokens: 总共消耗的token数量（输入+输出）
@@ -295,10 +287,10 @@ class ResponseProcessor:
                         if not has_printed_thinking_prefix:
                             # print("[THINKING]: ", end='', flush=True)
                             has_printed_thinking_prefix = True
-                        
+
                         # 实际打印思考内容（已注释掉）
                         # print(delta.reasoning_content, end='', flush=True)
-                        
+
                         # 将思考内容追加到累积内容中，确保完整保存响应
                         accumulated_content += delta.reasoning_content
 
@@ -338,13 +330,13 @@ class ResponseProcessor:
                                 current_xml_content = current_xml_content.replace(xml_chunk, "", 1)
                                 # 将处理过的XML块存入缓冲区，用于调试和日志记录
                                 xml_chunks_buffer.append(xml_chunk)
-                                
+
                                 # 解析XML块为工具调用对象，返回工具调用信息和解析详情
                                 result = self._parse_xml_tool_call(xml_chunk)
                                 if result:
                                     tool_call, parsing_details = result
                                     xml_tool_call_count += 1  # 递增XML工具调用计数器
-                                    
+
                                     # 获取当前助手消息的ID，用于关联工具调用上下文
                                     current_assistant_id = last_assistant_message_object['message_id'] if last_assistant_message_object else None
                                     # 创建工具调用上下文，包含执行所需的所有信息
@@ -382,44 +374,44 @@ class ResponseProcessor:
                             # ... (安全提取 tool_call_data_chunk 的逻辑) ...
                             tool_call_data_chunk = {} # 提取数据的占位符
                             # 尝试使用 model_dump 方法提取数据，否则手动提取
-                            if hasattr(tool_call_chunk, 'model_dump'): 
+                            if hasattr(tool_call_chunk, 'model_dump'):
                                 tool_call_data_chunk = tool_call_chunk.model_dump()
-                            else: 
+                            else:
                                 # 手动提取工具调用块的各个属性
-                                if hasattr(tool_call_chunk, 'id'): 
+                                if hasattr(tool_call_chunk, 'id'):
                                     tool_call_data_chunk['id'] = tool_call_chunk.id
-                                if hasattr(tool_call_chunk, 'index'): 
+                                if hasattr(tool_call_chunk, 'index'):
                                     tool_call_data_chunk['index'] = tool_call_chunk.index
-                                if hasattr(tool_call_chunk, 'type'): 
+                                if hasattr(tool_call_chunk, 'type'):
                                     tool_call_data_chunk['type'] = tool_call_chunk.type
                                 if hasattr(tool_call_chunk, 'function'):
                                     tool_call_data_chunk['function'] = {}
-                                    if hasattr(tool_call_chunk.function, 'name'): 
+                                    if hasattr(tool_call_chunk.function, 'name'):
                                         tool_call_data_chunk['function']['name'] = tool_call_chunk.function.name
-                                    if hasattr(tool_call_chunk.function, 'arguments'): 
+                                    if hasattr(tool_call_chunk.function, 'arguments'):
                                         # 如果参数是字符串则直接使用，否则转换为 JSON 字符串
                                         tool_call_data_chunk['function']['arguments'] = tool_call_chunk.function.arguments if isinstance(tool_call_chunk.function.arguments, str) else to_json_string(tool_call_chunk.function.arguments)
 
                             # 记录当前时间并生成工具调用块状态
                             now_tool_chunk = datetime.now(timezone.utc).isoformat()
                             yield {
-                                "message_id": None, 
-                                "thread_id": thread_id, 
-                                "type": "status", 
+                                "message_id": None,
+                                "thread_id": thread_id,
+                                "type": "status",
                                 "is_llm_message": True,
                                 "content": to_json_string({
-                                    "role": "assistant", 
-                                    "status_type": "tool_call_chunk", 
+                                    "role": "assistant",
+                                    "status_type": "tool_call_chunk",
                                     "tool_call_chunk": tool_call_data_chunk
                                 }),
                                 "metadata": to_json_string({"thread_run_id": thread_run_id}),
-                                "created_at": now_tool_chunk, 
+                                "created_at": now_tool_chunk,
                                 "updated_at": now_tool_chunk
                             }
 
                             # --- 缓冲并执行完整的原生工具调用 ---
                             # 如果工具调用块没有函数属性，则跳过
-                            if not hasattr(tool_call_chunk, 'function'): 
+                            if not hasattr(tool_call_chunk, 'function'):
                                 continue
                             # 获取工具调用块的索引，如果没有则默认为 0
                             idx = tool_call_chunk.index if hasattr(tool_call_chunk, 'index') else 0
@@ -435,7 +427,7 @@ class ResponseProcessor:
                                     # 尝试解析参数为 JSON，如果成功则标记为完整工具调用
                                     safe_json_parse(tool_calls_buffer[idx]['function']['arguments'])
                                     has_complete_tool_call = True
-                                except json.JSONDecodeError: 
+                                except json.JSONDecodeError:
                                     # 如果解析失败则忽略
                                     pass
 
@@ -457,7 +449,7 @@ class ResponseProcessor:
 
                                 # 保存并生成工具开始状态
                                 started_msg_obj = await self._yield_and_save_tool_started(context, thread_id, thread_run_id)
-                                if started_msg_obj: 
+                                if started_msg_obj:
                                     yield format_for_yield(started_msg_obj)
                                 # 标记状态已生成
                                 yielded_tool_indices.add(tool_index)
@@ -466,9 +458,9 @@ class ResponseProcessor:
                                 execution_task = asyncio.create_task(self._execute_tool(tool_call_data))
                                 # 将任务添加到待处理执行列表中
                                 pending_tool_executions.append({
-                                    "task": execution_task, 
+                                    "task": execution_task,
                                     "tool_call": tool_call_data,
-                                    "tool_index": tool_index, 
+                                    "tool_index": tool_index,
                                     "context": context
                                 })
                                 # 增加工具索引
@@ -484,7 +476,7 @@ class ResponseProcessor:
             # --- After Streaming Loop ---
             
             # --- 流处理循环结束后的处理 ---
-            
+
             # 检查是否从LLM提供商获得了token使用数据
             # 如果没有获得，则使用litellm.token_counter来估算token使用量
             if (
@@ -525,13 +517,13 @@ class ResponseProcessor:
             # 等待流式阶段中待处理的工具执行完成
             # 创建一个缓冲区来存储工具执行结果，每个元素包含(工具调用, 执行结果, 工具索引, 上下文)
             tool_results_buffer = []
-            
+
             # 如果存在待处理的工具执行任务
             if pending_tool_executions:
                 logger.info(f"等待 {len(pending_tool_executions)} 个流式工具执行完成")
-                self.trace.event(name="waiting_for_pending_streamed_tool_executions", level="DEFAULT", 
+                self.trace.event(name="waiting_for_pending_streamed_tool_executions", level="DEFAULT",
                                status_message=(f"等待 {len(pending_tool_executions)} 个流式工具执行完成"))
-                
+
                 # 提取所有待执行的异步任务
                 pending_tasks = [execution["task"] for execution in pending_tool_executions]
                 # 等待所有任务完成，done包含已完成的任务，_包含未完成的任务（理论上应该都已完成）
@@ -546,7 +538,7 @@ class ResponseProcessor:
                     # 检查该工具的状态是否已在流式阶段返回
                     if tool_idx in yielded_tool_indices:
                         logger.debug(f"工具索引 {tool_idx} 的状态已在流式阶段返回")
-                        
+
                         # 即使状态已返回，仍需处理结果以填充缓冲区
                         try:
                             # 检查任务是否确实已完成
@@ -556,29 +548,29 @@ class ResponseProcessor:
                                 context.result = result  # 将结果保存到上下文中
                                 # 将结果添加到缓冲区
                                 tool_results_buffer.append((execution["tool_call"], result, tool_idx, context))
-                                
+
                                 # 检查是否为终止工具（ask或complete），如果是则设置终止标志
                                 if tool_name in ['ask', 'complete']:
                                     logger.info(f"终止工具 '{tool_name}' 在流式阶段完成，设置终止标志")
-                                    self.trace.event(name="terminating_tool_completed_during_streaming", level="DEFAULT", 
+                                    self.trace.event(name="terminating_tool_completed_during_streaming", level="DEFAULT",
                                                    status_message=(f"终止工具 '{tool_name}' 在流式阶段完成，设置终止标志"))
                                     agent_should_terminate = True
                                      
                             else:  # 理论上不应该发生，因为asyncio.wait应该等待所有任务完成
                                 logger.warning(f"工具索引 {tool_idx} 的任务在等待后仍未完成")
-                                self.trace.event(name="task_for_tool_index_not_done_after_wait", level="WARNING", 
+                                self.trace.event(name="task_for_tool_index_not_done_after_wait", level="WARNING",
                                                status_message=(f"工具索引 {tool_idx} 的任务在等待后仍未完成"))
-                        
+
                         except Exception as e:
                             # 处理工具执行异常
                             logger.error(f"获取待处理工具执行 {tool_idx} 的结果时出错: {str(e)}")
-                            self.trace.event(name="error_getting_result_for_pending_tool_execution", level="ERROR", 
+                            self.trace.event(name="error_getting_result_for_pending_tool_execution", level="ERROR",
                                            status_message=(f"获取待处理工具执行 {tool_idx} 的结果时出错: {str(e)}"))
                             context.error = e
                             # 保存并返回工具错误状态消息（即使已开始状态已返回）
                             error_msg_obj = await self._yield_and_save_tool_error(context, thread_id, thread_run_id)
                             if error_msg_obj: yield format_for_yield(error_msg_obj)
-                        
+
                         continue  # 跳过该工具索引的进一步状态返回
 
                     # 如果状态之前未返回（理论上不应该发生），现在返回
@@ -592,7 +584,7 @@ class ResponseProcessor:
                             # 检查是否为终止工具
                             if tool_name in ['ask', 'complete']:
                                 logger.info(f"终止工具 '{tool_name}' 在流式阶段完成，设置终止标志")
-                                self.trace.event(name="terminating_tool_completed_during_streaming", level="DEFAULT", 
+                                self.trace.event(name="terminating_tool_completed_during_streaming", level="DEFAULT",
                                                status_message=(f"终止工具 '{tool_name}' 在流式阶段完成，设置终止标志"))
                                 agent_should_terminate = True
                                 
@@ -605,7 +597,7 @@ class ResponseProcessor:
                     except Exception as e:
                         # 处理工具执行异常
                         logger.error(f"获取待处理工具执行 {tool_idx} 的结果/返回状态时出错: {str(e)}")
-                        self.trace.event(name="error_getting_result_yielding_status_for_pending_tool_execution", level="ERROR", 
+                        self.trace.event(name="error_getting_result_yielding_status_for_pending_tool_execution", level="ERROR",
                                        status_message=(f"获取待处理工具执行 {tool_idx} 的结果/返回状态时出错: {str(e)}"))
                         context.error = e
                         # 保存并返回工具错误状态
@@ -649,7 +641,7 @@ class ResponseProcessor:
                                     "id": tc_buf['id'], "type": "function",
                                     "function": {"name": tc_buf['function']['name'],"arguments": args}
                                 })
-                            except json.JSONDecodeError: 
+                            except json.JSONDecodeError:
                                 # JSON解析失败时跳过此工具调用
                                 continue
 
@@ -1940,7 +1932,7 @@ class ResponseProcessor:
         Returns:
             Optional[Dict[str, Any]]: 保存后的完整消息对象，如果保存失败则返回None
         """
-        
+
         tool_name = context.xml_tag_name or context.function_name
         content = {
             "role": "assistant", "status_type": "tool_started",

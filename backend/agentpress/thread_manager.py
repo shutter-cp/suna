@@ -269,14 +269,14 @@ class ThreadManager:
             if xml_examples:
                 # 构建XML工具调用说明内容
                 examples_content = """
- --- XML TOOL CALLING ---
+                --- XML TOOL CALLING ---
 
- In this environment you have access to a set of tools you can use to answer the user's question. The tools are specified in XML format.
- Format your tool calls using the specified XML tags. Place parameters marked as 'attribute' within the opening tag (e.g., `<tag attribute='value'>`). Place parameters marked as 'content' between the opening and closing tags. Place parameters marked as 'element' within their own child tags (e.g., `<tag><element>value</element></tag>`). Refer to the examples provided below for the exact structure of each tool.
- String and scalar parameters should be specified as attributes, while content goes between tags.
- Note that spaces for string values are not stripped. The output is parsed with regular expressions.
+                In this environment you have access to a set of tools you can use to answer the user's question. The tools are specified in XML format.
+                Format your tool calls using the specified XML tags. Place parameters marked as 'attribute' within the opening tag (e.g., `<tag attribute='value'>`). Place parameters marked as 'content' between the opening and closing tags. Place parameters marked as 'element' within their own child tags (e.g., `<tag><element>value</element></tag>`). Refer to the examples provided below for the exact structure of each tool.
+                String and scalar parameters should be specified as attributes, while content goes between tags.
+                Note that spaces for string values are not stripped. The output is parsed with regular expressions.
 
- Here are the XML tools available with examples:
+                Here are the XML tools available with examples:
                 """
                 # 添加每个工具的示例
                 for tag_name, example in xml_examples.items():
