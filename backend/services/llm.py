@@ -40,7 +40,8 @@ def setup_api_keys() -> None:
     """Set up API keys from environment variables."""
     providers = ['OPENAI', 'ANTHROPIC', 'GROQ', 'OPENROUTER', 'XAI']
     for provider in providers:
-        key = getattr(config, f'{provider}_API_KEY')
+        # key = getattr(config, f'{provider}_API_KEY')
+        key = getattr(config, 'OPENAI_API_KEY')
         if key:
             logger.debug(f"API key set for provider: {provider}")
         else:
@@ -135,8 +136,14 @@ def prepare_params(
 
     if api_key:
         params["api_key"] = api_key
-    if api_base:
+    
+    # Check if OPENAI_BASE_URL is configured and override api_base for all models
+    if config.OPENAI_BASE_URL:
+        params["api_base"] = config.OPENAI_BASE_URL
+        logger.debug(f"Using OPENAI_BASE_URL for all models: {config.OPENAI_BASE_URL}")
+    elif api_base:
         params["api_base"] = api_base
+        
     if model_id:
         params["model_id"] = model_id
 
@@ -318,6 +325,7 @@ async def make_llm_api_call(
         enable_thinking=enable_thinking,
         reasoning_effort=reasoning_effort
     )
+    print(params)
     last_error = None
     for attempt in range(MAX_RETRIES):
         try:
