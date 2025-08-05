@@ -1,7 +1,22 @@
 # Master model configuration - single source of truth
 MODELS = {
     # Free tier models
-
+    "deepseek-v3-0324":{
+        "aliases": ["deepseek-v3-0324-agicto"],
+        "pricing": {
+            "input_cost_per_million_tokens": 0.38,
+            "output_cost_per_million_tokens": 0.89
+        },
+        "tier_availability": ["free", "paid"]
+    },
+    "deepseek-r1-250528":{
+        "aliases": ["deepseek-r1-250528-agicto"],
+        "pricing": {
+            "input_cost_per_million_tokens": 0.38,
+            "output_cost_per_million_tokens": 0.89
+        },
+        "tier_availability": ["free", "paid"]
+    },
     "openai/claude-3-7-sonnet-20250219": {
         "aliases": ["claude-sonnet-37"],
         "pricing": {
